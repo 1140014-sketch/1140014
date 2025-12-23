@@ -3,26 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>倖存者遊戲</title>
+    <title>倖存者遊戲 - 自動吸收版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             background-color: #1a202c;
             color: #e2e8f0;
             font-family: 'Inter', sans-serif;
-            overflow: hidden; /* 隱藏滾動條 */
+            overflow: hidden;
         }
         canvas {
             background-color: #2d3748;
             display: block;
             border-radius: 0.5rem;
+            cursor: crosshair;
         }
         .hud-element {
             position: absolute;
             color: white;
             font-weight: bold;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
         }
+        #saveButton { pointer-events: auto; }
         #xpBarContainer {
             position: absolute;
             bottom: 1rem;
@@ -62,8 +65,8 @@
     
     <!-- 開始遊戲畫面 -->
     <div id="startScreen" class="absolute inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center text-white z-20">
-        <h1 class="text-5xl font-bold mb-4">倖存者</h1>
-        <p class="text-xl mb-8">使用 WASD 或方向鍵移動，活下去！</p>
+        <h1 class="text-5xl font-bold mb-4">倖存者 - 自動吸收</h1>
+        <p class="text-xl mb-8">每 5 秒自動吸收地圖上所有經驗球！</p>
         <button id="startButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-2xl transition duration-300">開始新遊戲</button>
         <button id="loadButton" class="mt-4 bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-3 px-6 rounded-lg text-2xl transition duration-300">讀取存檔</button>
     </div>
@@ -79,14 +82,11 @@
     <!-- 升級畫面 -->
     <div id="levelUpScreen" class="hidden absolute inset-0 bg-black bg-opacity-80 flex-col items-center justify-center text-white z-10">
         <h1 class="text-4xl font-bold mb-8">選擇一個升級！</h1>
-        <div id="skillOptions" class="flex gap-6">
-            <!-- 技能選項會動態生成於此 -->
-        </div>
+        <div id="skillOptions" class="flex gap-6"></div>
     </div>
 
 
     <script>
-        // 取得 HTML 元素
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreDisplay = document.getElementById('scoreDisplay');
@@ -104,12 +104,15 @@
         const loadButton = document.getElementById('loadButton');
         const saveMessage = document.getElementById('saveMessage');
 
-
         let animationFrameId;
         let gameRunning = false;
         let gamePaused = false;
 
-        // 設定畫布大小
+        // 地圖與攝影機參數
+        const WORLD_WIDTH = 3000;
+        const WORLD_HEIGHT = 3000;
+        let camera = { x: 0, y: 0 };
+
         function resizeCanvas() {
             canvas.width = window.innerWidth * 0.9;
             canvas.height = window.innerHeight * 0.9;
@@ -120,52 +123,71 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
         
-        // 遊戲變數
         let player, score;
         let projectiles = [], enemies = [], experienceOrbs = [], aoeAttacks = [], turrets = [];
-        let enemySpawnInterval, shootInterval, difficultyInterval, aoeInterval, bossWaveInterval, turretInterval;
-
-        // 玩家技能狀態
+        let enemySpawnInterval, shootInterval, difficultyInterval, aoeInterval, bossWaveInterval, turretInterval, magnetInterval;
         let playerSkills = {};
+        let magnetPulse = { active: false, radius: 0, life: 0 };
 
-        // 按鍵監聽
-        const keys = {
-            w: false, a: false, s: false, d: false,
-            ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false
-        };
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false };
+        window.addEventListener('keydown', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = false; });
 
-        window.addEventListener('keydown', (e) => {
-            if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
-        });
-        window.addEventListener('keyup', (e) => {
-            if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
-        });
+        function worldToScreen(worldX, worldY) {
+            return { x: worldX - camera.x, y: worldY - camera.y };
+        }
 
-        // 類別定義
         class Player {
             constructor(x, y, radius, color, speed) {
                 this.x = x; this.y = y; this.radius = radius;
                 this.color = color; this.speed = speed;
                 this.health = 100; this.maxHealth = 100;
                 this.level = 1; this.xp = 0; this.xpToNextLevel = 100;
-                this.pickupRadius = 100;
+                this.pickupRadius = 120;
             }
             draw() {
+                const screenPos = worldToScreen(this.x, this.y);
+                
+                // 繪製磁鐵脈衝
+                if (magnetPulse.active) {
+                    ctx.beginPath();
+                    ctx.arc(screenPos.x, screenPos.y, magnetPulse.radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(66, 153, 225, ${1 - magnetPulse.life / 60})`;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+
+                // 繪製拾取範圍圈
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.pickupRadius, 0, Math.PI * 2, false);
+                ctx.arc(screenPos.x, screenPos.y, this.pickupRadius, 0, Math.PI * 2, false);
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
                 ctx.fill();
 
+                // 繪製玩家本體
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
-                ctx.fillStyle = this.color; ctx.fill();
+                ctx.arc(screenPos.x, screenPos.y, this.radius, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             }
             update() {
                 if (gamePaused) return;
-                if ((keys.w || keys.ArrowUp) && this.y - this.radius > 0) this.y -= this.speed;
-                if ((keys.s || keys.ArrowDown) && this.y + this.radius < canvas.height) this.y += this.speed;
-                if ((keys.a || keys.ArrowLeft) && this.x - this.radius > 0) this.x -= this.speed;
-                if ((keys.d || keys.ArrowRight) && this.x + this.radius < canvas.width) this.x += this.speed;
+                if ((keys.w || keys.ArrowUp) && this.y > 0) this.y -= this.speed;
+                if ((keys.s || keys.ArrowDown) && this.y < WORLD_HEIGHT) this.y += this.speed;
+                if ((keys.a || keys.ArrowLeft) && this.x > 0) this.x -= this.speed;
+                if ((keys.d || keys.ArrowRight) && this.x < WORLD_WIDTH) this.x += this.speed;
+                
+                camera.x = this.x - canvas.width / 2;
+                camera.y = this.y - canvas.height / 2;
+
+                if (magnetPulse.active) {
+                    magnetPulse.life++;
+                    magnetPulse.radius += 15;
+                    if (magnetPulse.life > 60) magnetPulse.active = false;
+                }
+                
                 this.draw();
             }
             gainXP(amount) {
@@ -181,15 +203,17 @@
         }
 
         class Projectile { 
-            constructor(x, y, radius, color, velocity, maxLife = 120) {
+            constructor(x, y, radius, color, velocity, maxLife = 120, penetration) {
                 this.x = x; this.y = y; this.radius = radius;
                 this.color = color; this.velocity = velocity;
-                this.life = 0;
-                this.maxLife = maxLife;
+                this.life = 0; this.maxLife = maxLife;
+                this.penetration = penetration; 
+                this.hitEnemies = new Set(); 
             }
             draw() {
+                const screenPos = worldToScreen(this.x, this.y);
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.arc(screenPos.x, screenPos.y, this.radius, 0, Math.PI * 2, false);
                 ctx.fillStyle = this.color; ctx.fill();
             }
             update() { 
@@ -201,46 +225,37 @@
         }
 
         class Enemy { 
-            constructor(x, y, radius, color, velocity, health = 1) {
+            constructor(x, y, radius, color, speed, health = 1) {
                 this.x = x; this.y = y; this.radius = radius;
-                this.color = color; this.velocity = velocity;
-                this.health = health;
-                this.maxHealth = health;
+                this.color = color; this.speed = speed;
+                this.health = health; this.maxHealth = health;
             }
             draw() {
+                const screenPos = worldToScreen(this.x, this.y);
+                if (screenPos.x < -100 || screenPos.x > canvas.width + 100 || screenPos.y < -100 || screenPos.y > canvas.height + 100) return;
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.arc(screenPos.x, screenPos.y, this.radius, 0, Math.PI * 2, false);
                 ctx.fillStyle = this.color; ctx.fill();
-
                 if (this.maxHealth > 1) {
                     const barWidth = this.radius * 2;
-                    const barHeight = 10;
-                    const barX = this.x - this.radius;
-                    const barY = this.y - this.radius - barHeight - 5;
-                    
+                    const barHeight = 6;
                     ctx.fillStyle = '#333';
-                    ctx.fillRect(barX, barY, barWidth, barHeight);
-
+                    ctx.fillRect(screenPos.x - this.radius, screenPos.y - this.radius - 15, barWidth, barHeight);
                     ctx.fillStyle = 'red';
-                    const healthPercentage = this.health / this.maxHealth;
-                    ctx.fillRect(barX, barY, barWidth * healthPercentage, barHeight);
+                    ctx.fillRect(screenPos.x - this.radius, screenPos.y - this.radius - 15, barWidth * (this.health / this.maxHealth), barHeight);
                 }
             }
             update() {
                 const angle = Math.atan2(player.y - this.y, player.x - this.x);
-                let speed = this instanceof Boss ? 0.8 : 1;
-                this.velocity.x = Math.cos(angle) * speed;
-                this.velocity.y = Math.sin(angle) * speed;
-                this.x += this.velocity.x; this.y += this.velocity.y;
+                this.x += Math.cos(angle) * this.speed;
+                this.y += Math.sin(angle) * this.speed;
                 this.draw();
             }
         }
 
         class Boss extends Enemy {
             constructor(x, y, health) {
-                const angle = Math.atan2(player.y - y, player.x - x);
-                const velocity = { x: Math.cos(angle), y: Math.sin(angle) };
-                super(x, y, 50, 'purple', velocity, health || 100);
+                super(x, y, 50, 'purple', 0.8, health || 120);
             }
         }
         
@@ -248,17 +263,20 @@
             constructor(x, y, radius, color, xpValue) {
                 this.x = x; this.y = y; this.radius = radius;
                 this.color = color; this.xpValue = xpValue;
+                this.beingMagnetized = false;
             }
             draw() {
+                const screenPos = worldToScreen(this.x, this.y);
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.arc(screenPos.x, screenPos.y, this.radius, 0, Math.PI * 2);
                 ctx.fillStyle = this.color; ctx.fill();
             }
             update() {
                 const dist = Math.hypot(player.x - this.x, player.y - this.y);
-                if (dist < player.pickupRadius) {
+                // 常規拾取或磁鐵模式
+                if (dist < player.pickupRadius || this.beingMagnetized) {
                     const angle = Math.atan2(player.y - this.y, player.x - this.x);
-                    const speed = 5;
+                    const speed = this.beingMagnetized ? 15 : 7;
                     this.x += Math.cos(angle) * speed;
                     this.y += Math.sin(angle) * speed;
                 }
@@ -273,8 +291,9 @@
                 this.life = 0; this.radius = 0; this.hitEnemies = new Set();
             }
             draw() {
+                const screenPos = worldToScreen(this.x, this.y);
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.arc(screenPos.x, screenPos.y, this.radius, 0, Math.PI * 2);
                 ctx.strokeStyle = `rgba(255, 100, 100, ${1 - this.life / this.duration})`;
                 ctx.lineWidth = 4; ctx.stroke();
             }
@@ -287,155 +306,95 @@
 
         class Turret {
             constructor(x, y) {
-                this.x = x;
-                this.y = y;
-                this.radius = 20;
+                this.x = x; this.y = y; this.radius = 20;
                 this.color = 'orange';
-                this.maxLife = 1800; // 30 seconds at 60fps
-                this.life = this.maxLife;
-                this.range = 300;
-                this.shootRate = 1000; // Shoots every 1 second
+                this.maxLife = 1800; this.life = this.maxLife;
+                this.range = 400;
+                this.shootRate = 400; 
                 this.shootIntervalId = setInterval(() => this.shoot(), this.shootRate);
             }
-
             draw() {
-                // Draw turret base
+                const screenPos = worldToScreen(this.x, this.y);
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = this.color;
-                ctx.fill();
+                ctx.arc(screenPos.x, screenPos.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color; ctx.fill();
                 ctx.strokeStyle = 'white';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                
-                // Draw life timer circle
+                ctx.lineWidth = 3; ctx.stroke();
                 ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius + 5, -Math.PI / 2, -Math.PI / 2 + (this.life / this.maxLife) * (Math.PI * 2));
+                ctx.arc(screenPos.x, screenPos.y, this.radius + 5, -Math.PI / 2, -Math.PI / 2 + (this.life / this.maxLife) * (Math.PI * 2));
                 ctx.strokeStyle = 'cyan';
-                ctx.lineWidth = 4;
-                ctx.stroke();
+                ctx.lineWidth = 4; ctx.stroke();
             }
-
-            update() {
-                this.life--;
-                this.draw();
-            }
-
+            update() { this.life--; this.draw(); }
             shoot() {
                 if (gamePaused || enemies.length === 0) return;
-                
                 let nearestEnemy = null;
                 let minDistance = this.range;
                 enemies.forEach(enemy => {
                     const dist = Math.hypot(this.x - enemy.x, this.y - enemy.y);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        nearestEnemy = enemy;
-                    }
+                    if (dist < minDistance) { minDistance = dist; nearestEnemy = enemy; }
                 });
-                
                 if (nearestEnemy) {
                     const angle = Math.atan2(nearestEnemy.y - this.y, nearestEnemy.x - this.x);
-                    const velocity = { x: Math.cos(angle) * 7, y: Math.sin(angle) * 7 };
-                    projectiles.push(new Projectile(this.x, this.y, 6, 'yellow', velocity, 90));
+                    const velocity = { x: Math.cos(angle) * 8, y: Math.sin(angle) * 8 };
+                    projectiles.push(new Projectile(this.x, this.y, 6, 'yellow', velocity, 100));
                 }
             }
-            
-            destroy() {
-                clearInterval(this.shootIntervalId);
-            }
+            destroy() { clearInterval(this.shootIntervalId); }
         }
-
 
         const allSkills = {
             increaseFireRate: { name: "提升射速", description: "子彈發射速度提升 15%" },
             increaseMoveSpeed: { name: "提升移速", description: "移動速度提升 10%" },
             addProjectile: { name: "額外子彈", description: "增加一個額外的投射物" },
             aoeDamage: { name: "傷害光環", description: "週期性地對周圍敵人造成傷害" },
-            increasePickupRadius: { name: "拾取範圍", description: "自動拾取經驗的範圍擴大 50%" },
-            unlimitedAmmo: { name: "無限子彈", description: "子彈如暴雨般傾瀉而出！" },
-            increaseMaxHealth: { name: "增加生命上限", description: "最大生命值提升 25 點並回復生命" },
-            autoTurret: { name: "自動砲台", description: "每15秒安裝一座砲台，持續30秒。" },
-            increaseProjectileRange: { name: "增加射程", description: "子彈飛行距離提升 25%。" }
+            increasePickupRadius: { name: "拾取範圍", description: "拾取範圍擴大 40%" },
+            increaseMaxHealth: { name: "增加生命上限", description: "最大生命值提升 25 點" },
+            autoTurret: { name: "自動砲台", description: "每5秒在原地安裝一座砲台" },
+            bulletPenetration: { name: "子彈穿透", description: "子彈可以多穿透一個敵人" }
         };
 
         function init(savedState = null) {
             projectiles = []; aoeAttacks = []; turrets = [];
-
             if (savedState) {
-                // 從存檔恢復
-                const pData = savedState.player;
-                player = new Player(pData.x, pData.y, pData.radius, pData.color, pData.speed);
-                Object.assign(player, pData);
-
+                player = new Player(savedState.player.x, savedState.player.y, savedState.player.radius, savedState.player.color, savedState.player.speed);
+                Object.assign(player, savedState.player);
                 playerSkills = savedState.playerSkills;
                 score = savedState.score;
-
-                enemies = savedState.enemies.map(eData => {
-                    const angle = Math.atan2(player.y - eData.y, player.x - eData.x);
-                    const velocity = { x: Math.cos(angle), y: Math.sin(angle) };
-                    if (eData.type === 'boss') {
-                        return new Boss(eData.x, eData.y, eData.health);
-                    }
-                    return new Enemy(eData.x, eData.y, eData.radius, eData.color, velocity, eData.health);
-                });
-
-                experienceOrbs = savedState.experienceOrbs.map(oData => {
-                    return new ExperienceOrb(oData.x, oData.y, oData.radius, oData.color, oData.xpValue);
-                });
-
-                if (savedState.turrets) {
-                    turrets = savedState.turrets.map(tData => {
-                        const turret = new Turret(tData.x, tData.y);
-                        turret.life = tData.life;
-                        return turret;
-                    });
-                }
-
+                enemies = savedState.enemies.map(e => e.type === 'boss' ? new Boss(e.x, e.y, e.health) : new Enemy(e.x, e.y, e.radius, e.color, 1.2, e.health));
+                experienceOrbs = savedState.experienceOrbs.map(o => new ExperienceOrb(o.x, o.y, o.radius, o.color, o.xpValue));
             } else {
-                // 開始新遊戲
-                player = new Player(canvas.width / 2, canvas.height / 2, 15, 'hsl(200, 100%, 50%)', 4);
-                enemies = []; experienceOrbs = [];
-                score = 0;
-                playerSkills = {
-                    fireRate: 500,
-                    projectiles: 1,
-                    projectileRange: 60, 
-                };
+                player = new Player(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 15, 'hsl(200, 100%, 50%)', 5);
+                enemies = []; experienceOrbs = []; score = 0;
+                playerSkills = { fireRate: 500, projectiles: 1, projectileRange: 100, penetration: 0 };
             }
-            
             updateUI();
-            
-            let spawnRate = 1000;
-            const bossWaveIntervalTime = 30000; // 固定30秒
-
-            [enemySpawnInterval, shootInterval, difficultyInterval, aoeInterval, bossWaveInterval, turretInterval].forEach(clearInterval);
-
+            let spawnRate = 600; 
+            [enemySpawnInterval, shootInterval, difficultyInterval, aoeInterval, bossWaveInterval, turretInterval, magnetInterval].forEach(clearInterval);
             enemySpawnInterval = setInterval(spawnEnemy, spawnRate);
             shootInterval = setInterval(shoot, playerSkills.fireRate);
-            bossWaveInterval = setInterval(spawnBossWave, bossWaveIntervalTime);
+            bossWaveInterval = setInterval(spawnBossWave, 20000);
             
-            if (playerSkills.aoe) {
-                 aoeInterval = setInterval(() => {
-                    if (!gamePaused) aoeAttacks.push(new AoeAttack(player.x, player.y, 100, 'red', 30));
-                 }, 3000);
-            }
-            
-            if (playerSkills.autoTurret) {
-                 turretInterval = setInterval(() => {
-                    if (!gamePaused) turrets.push(new Turret(player.x, player.y));
-                }, 15000);
-            }
+            // 每 5 秒啟動一次全局經驗吸收
+            magnetInterval = setInterval(triggerMagnet, 5000);
 
             difficultyInterval = setInterval(() => {
                 clearInterval(enemySpawnInterval);
-                spawnRate = Math.max(200, spawnRate * 0.95);
+                spawnRate = Math.max(120, spawnRate * 0.85);
                 enemySpawnInterval = setInterval(spawnEnemy, spawnRate);
-            }, 30000); 
+            }, 15000);
+        }
+
+        function triggerMagnet() {
+            if (gamePaused || !gameRunning) return;
+            magnetPulse.active = true;
+            magnetPulse.radius = 0;
+            magnetPulse.life = 0;
+            experienceOrbs.forEach(orb => orb.beingMagnetized = true);
         }
 
         function updateUI() {
-            healthDisplay.textContent = `生命: ${player.health} / ${player.maxHealth}`;
+            healthDisplay.textContent = `生命: ${Math.ceil(player.health)} / ${player.maxHealth}`;
             scoreDisplay.textContent = `分數: ${score}`;
             levelDisplay.textContent = `等級: ${player.level}`;
             xpBar.style.width = `${(player.xp / player.xpToNextLevel) * 100}%`;
@@ -443,237 +402,152 @@
 
         function spawnEnemy() {
              if (gamePaused) return;
-             const radius = Math.random() * 20 + 10;
-             let x, y;
-             if (Math.random() < 0.5) {
-                 x = Math.random() < 0.5 ? 0 - radius : canvas.width + radius;
-                 y = Math.random() * canvas.height;
-             } else {
-                 x = Math.random() * canvas.width;
-                 y = Math.random() < 0.5 ? 0 - radius : canvas.height + radius;
-             }
-             const color = `hsl(${Math.random() * 360}, 50%, 50%)`;
-             const angle = Math.atan2(player.y - y, player.x - x);
-             const velocity = { x: Math.cos(angle), y: Math.sin(angle) };
-             enemies.push(new Enemy(x, y, radius, color, velocity));
+             const angle = Math.random() * Math.PI * 2;
+             const dist = Math.max(canvas.width, canvas.height) / 1.5 + 100;
+             let x = player.x + Math.cos(angle) * dist;
+             let y = player.y + Math.sin(angle) * dist;
+             x = Math.max(0, Math.min(WORLD_WIDTH, x));
+             y = Math.max(0, Math.min(WORLD_HEIGHT, y));
+             const radius = Math.random() * 15 + 10;
+             const color = `hsl(${Math.random() * 360}, 60%, 60%)`;
+             enemies.push(new Enemy(x, y, radius, color, 1.3));
         }
         
         function spawnBossWave() {
             if (gamePaused) return;
-            const bossCount = 10;
-            for (let i = 0; i < bossCount; i++) {
-                setTimeout(spawnBoss, i * 150);
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                const dist = 600;
+                enemies.push(new Boss(player.x + Math.cos(angle) * dist, player.y + Math.sin(angle) * dist));
             }
         }
-
-        function spawnBoss() {
-            if (gamePaused) return;
-            const radius = 50;
-            let x, y;
-            if (Math.random() < 0.5) {
-                x = Math.random() < 0.5 ? 0 - radius : canvas.width + radius;
-                y = Math.random() * canvas.height;
-            } else {
-                x = Math.random() * canvas.width;
-                y = Math.random() < 0.5 ? 0 - radius : canvas.height + radius;
-            }
-            enemies.push(new Boss(x, y));
-        }
-
 
         function shoot() {
              if (gamePaused || enemies.length === 0) return;
-            
              let nearestEnemy = null;
-             let minDistance = Infinity;
+             let minDistance = 600;
              enemies.forEach(enemy => {
                  const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-                 if (dist < minDistance) {
-                     minDistance = dist;
-                     nearestEnemy = enemy;
-                 }
+                 if (dist < minDistance) { minDistance = dist; nearestEnemy = enemy; }
              });
-             
              if (nearestEnemy) {
                 const mainAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
                 const spread = 0.2;
                 for (let i = 0; i < playerSkills.projectiles; i++) {
                     const angle = mainAngle + (i - (playerSkills.projectiles - 1) / 2) * spread;
-                    const velocity = { x: Math.cos(angle) * 6, y: Math.sin(angle) * 6 };
-                    projectiles.push(new Projectile(player.x, player.y, 5, 'white', velocity, playerSkills.projectileRange));
+                    const velocity = { x: Math.cos(angle) * 9, y: Math.sin(angle) * 9 };
+                    projectiles.push(new Projectile(player.x, player.y, 6, 'white', velocity, playerSkills.projectileRange, playerSkills.penetration));
                 }
              }
         }
-        
+
         function levelUp() {
             gamePaused = true;
             skillOptions.innerHTML = '';
-            const choices = generateSkillChoices(3);
+            const choices = Object.keys(allSkills).sort(() => 0.5 - Math.random()).slice(0, 3);
             choices.forEach(skillKey => {
                 const skill = allSkills[skillKey];
-                const button = document.createElement('button');
-                button.className = "bg-indigo-600 hover:bg-indigo-800 text-white font-bold p-6 rounded-lg transition duration-300 w-48 h-48 flex flex-col items-center justify-center text-center";
-                button.innerHTML = `<h2 class="text-xl mb-2">${skill.name}</h2><p class="text-sm font-normal">${skill.description}</p>`;
-                button.onclick = () => selectSkill(skillKey);
-                skillOptions.appendChild(button);
+                const btn = document.createElement('button');
+                btn.className = "bg-indigo-600 hover:bg-indigo-800 text-white font-bold p-4 rounded-lg w-40 h-40 flex flex-col items-center justify-center text-center text-sm";
+                btn.innerHTML = `<span class="text-lg mb-2">${skill.name}</span><span>${skill.description}</span>`;
+                btn.onclick = () => { applySkill(skillKey); levelUpScreen.classList.add('hidden'); gamePaused = false; };
+                skillOptions.appendChild(btn);
             });
-            levelUpScreen.classList.remove('hidden');
-            levelUpScreen.classList.add('flex');
+            levelUpScreen.classList.remove('hidden'); levelUpScreen.classList.add('flex');
         }
 
-        function generateSkillChoices(num) {
-            const keys = Object.keys(allSkills);
-            const shuffled = keys.sort(() => 0.5 - Math.random());
-            return shuffled.slice(0, num);
-        }
-
-        function selectSkill(skillKey) {
-            switch(skillKey) {
-                case 'increaseFireRate':
-                    playerSkills.fireRate = Math.max(100, playerSkills.fireRate * 0.85);
-                    clearInterval(shootInterval);
-                    shootInterval = setInterval(shoot, playerSkills.fireRate);
-                    break;
-                case 'increaseMoveSpeed':
-                    player.speed *= 1.10;
-                    break;
-                case 'addProjectile':
-                    playerSkills.projectiles++;
-                    break;
-                case 'aoeDamage':
-                    if (!playerSkills.aoe) {
-                        playerSkills.aoe = true;
-                        aoeInterval = setInterval(() => {
-                           if (!gamePaused) aoeAttacks.push(new AoeAttack(player.x, player.y, 100, 'red', 30));
-                        }, 3000);
-                    }
-                    break;
-                case 'increasePickupRadius':
-                    player.pickupRadius *= 1.5;
-                    break;
-                case 'unlimitedAmmo':
-                    playerSkills.fireRate = 50;
-                    clearInterval(shootInterval);
-                    shootInterval = setInterval(shoot, playerSkills.fireRate);
-                    break;
-                case 'increaseMaxHealth':
-                    player.maxHealth += 25;
-                    player.health = Math.min(player.health + 25, player.maxHealth);
-                    updateUI();
-                    break;
-                case 'autoTurret':
-                    if (!playerSkills.autoTurret) {
-                        playerSkills.autoTurret = true;
-                        turrets.push(new Turret(player.x, player.y));
-                        turretInterval = setInterval(() => {
-                            if (!gamePaused) turrets.push(new Turret(player.x, player.y));
-                        }, 15000);
-                    }
-                    break;
-                case 'increaseProjectileRange':
-                    playerSkills.projectileRange = (playerSkills.projectileRange || 60) * 1.25;
-                    break;
+        function applySkill(key) {
+            if (key === 'increaseFireRate') {
+                playerSkills.fireRate *= 0.85; clearInterval(shootInterval);
+                shootInterval = setInterval(shoot, playerSkills.fireRate);
+            } else if (key === 'increaseMoveSpeed') player.speed *= 1.1;
+            else if (key === 'addProjectile') playerSkills.projectiles++;
+            else if (key === 'increasePickupRadius') player.pickupRadius *= 1.4;
+            else if (key === 'increaseMaxHealth') { player.maxHealth += 25; player.health += 25; updateUI(); }
+            else if (key === 'bulletPenetration') playerSkills.penetration++;
+            else if (key === 'aoeDamage' && !playerSkills.aoe) {
+                playerSkills.aoe = true;
+                aoeInterval = setInterval(() => { if(!gamePaused) aoeAttacks.push(new AoeAttack(player.x, player.y, 150, 'red', 40)); }, 2500);
+            } else if (key === 'autoTurret') {
+                turrets.push(new Turret(player.x, player.y));
+                if (!playerSkills.turretTimer) {
+                    playerSkills.turretTimer = true;
+                    turretInterval = setInterval(() => { if(!gamePaused) turrets.push(new Turret(player.x, player.y)); }, 5000);
+                }
             }
-            levelUpScreen.classList.add('hidden');
-            levelUpScreen.classList.remove('flex');
-            gamePaused = false;
+        }
+
+        function drawGrid() {
+            const gridSize = 100; ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)'; ctx.lineWidth = 1;
+            const startX = Math.floor(camera.x / gridSize) * gridSize;
+            const startY = Math.floor(camera.y / gridSize) * gridSize;
+            for (let x = startX; x < camera.x + canvas.width + gridSize; x += gridSize) {
+                const screenX = x - camera.x;
+                ctx.beginPath(); ctx.moveTo(screenX, 0); ctx.lineTo(screenX, canvas.height); ctx.stroke();
+            }
+            for (let y = startY; y < camera.y + canvas.height + gridSize; y += gridSize) {
+                const screenY = y - camera.y;
+                ctx.beginPath(); ctx.moveTo(0, screenY); ctx.lineTo(canvas.width, screenY); ctx.stroke();
+            }
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)'; ctx.lineWidth = 5;
+            const topLeft = worldToScreen(0, 0);
+            ctx.strokeRect(topLeft.x, topLeft.y, WORLD_WIDTH, WORLD_HEIGHT);
         }
 
         function animate() {
             animationFrameId = requestAnimationFrame(animate);
-            ctx.fillStyle = 'rgba(45, 55, 72, 0.2)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            player.update();
-            
-            if (gamePaused) return;
-            
-            [projectiles, enemies, experienceOrbs, aoeAttacks, turrets].forEach(arr => arr.forEach(item => item.update()));
-            
-            handleCollisions();
-
-            turrets.forEach((turret, index) => {
-                if (turret.life <= 0) {
-                    turret.destroy();
-                    turrets.splice(index, 1);
-                }
-            });
-
-            projectiles = projectiles.filter(p => p.life <= p.maxLife && p.x > 0 && p.x < canvas.width && p.y > 0 && p.y < canvas.height);
-            aoeAttacks = aoeAttacks.filter(a => a.life <= a.duration);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#2d3748'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            drawGrid(); player.update();
+            if (!gamePaused) {
+                [projectiles, enemies, experienceOrbs, aoeAttacks, turrets].forEach(arr => arr.forEach(item => item.update()));
+                handleCollisions();
+                projectiles = projectiles.filter(p => p.life < p.maxLife);
+                aoeAttacks = aoeAttacks.filter(a => a.life < a.duration);
+                turrets = turrets.filter(t => t.life > 0);
+            } else {
+                [projectiles, enemies, experienceOrbs, aoeAttacks, turrets].forEach(arr => arr.forEach(item => item.draw()));
+            }
         }
 
         function handleCollisions() {
-            experienceOrbs.forEach((orb, index) => {
-                const dist = Math.hypot(player.x - orb.x, player.y - orb.y);
-                if (dist - orb.radius - player.radius < 1) {
-                    player.gainXP(orb.xpValue);
-                    experienceOrbs.splice(index, 1);
+            experienceOrbs.forEach((orb, i) => {
+                if (Math.hypot(player.x - orb.x, player.y - orb.y) < player.radius + orb.radius) {
+                    player.gainXP(orb.xpValue); experienceOrbs.splice(i, 1);
                 }
             });
-
-            enemies.forEach((enemy, eIndex) => {
-                const playerDist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-                if (playerDist - enemy.radius - player.radius < 1) {
-                    player.health -= 10;
-                    if (player.health < 0) player.health = 0;
-                    updateUI();
-                    enemies.splice(eIndex, 1);
+            enemies.forEach((enemy, eIdx) => {
+                if (Math.hypot(player.x - enemy.x, player.y - enemy.y) < player.radius + enemy.radius) {
+                    player.health -= 0.5; updateUI();
                     if (player.health <= 0) endGame();
-                    return;
                 }
-
-                projectiles.forEach((projectile, pIndex) => {
-                    const projDist = Math.hypot(projectile.x - enemy.x, projectile.y - enemy.y);
-                    if (projDist - enemy.radius - projectile.radius < 1) {
-                        enemy.health -= 1;
-                        projectiles.splice(pIndex, 1);
-
-                        if (enemy.health <= 0) {
-                            const isBoss = enemy instanceof Boss;
-                            score += isBoss ? 2000 : 100;
-                            const xpValue = isBoss ? 500 : 20;
-                            const orbColor = isBoss ? 'gold' : 'cyan';
-                            const orbRadius = isBoss ? 15 : 5;
-
-                            updateUI();
-                            experienceOrbs.push(new ExperienceOrb(enemy.x, enemy.y, orbRadius, orbColor, xpValue));
-                            enemies.splice(eIndex, 1);
-                        }
-                        return;
+                projectiles.forEach((proj, pIdx) => {
+                    if (!proj.hitEnemies.has(enemy) && Math.hypot(proj.x - enemy.x, proj.y - enemy.y) < proj.radius + enemy.radius) {
+                        proj.hitEnemies.add(enemy); enemy.health -= 1;
+                        if (proj.penetration > 0) proj.penetration--; else projectiles.splice(pIdx, 1);
+                        if (enemy.health <= 0) killEnemy(enemy, eIdx);
                     }
                 });
-
-                aoeAttacks.forEach(attack => {
-                    if (attack.hitEnemies.has(enemy)) return;
-                    const aoeDist = Math.hypot(attack.x - enemy.x, attack.y - enemy.y);
-                    if (aoeDist - enemy.radius - attack.radius < 1) {
-                        attack.hitEnemies.add(enemy);
-                        enemy.health -= 1; 
-
-                        if (enemy.health <= 0) {
-                            const isBoss = enemy instanceof Boss;
-                            score += isBoss ? 2000 : 50;
-                            const xpValue = isBoss ? 500 : 10;
-                            const orbColor = isBoss ? 'gold' : 'cyan';
-                            const orbRadius = isBoss ? 15 : 5;
-
-                            updateUI();
-                            experienceOrbs.push(new ExperienceOrb(enemy.x, enemy.y, orbRadius, orbColor, xpValue));
-                            enemies.splice(eIndex, 1);
-                        }
-                        return;
+                aoeAttacks.forEach(aoe => {
+                    if (!aoe.hitEnemies.has(enemy) && Math.hypot(aoe.x - enemy.x, aoe.y - enemy.y) < aoe.radius + enemy.radius) {
+                        aoe.hitEnemies.add(enemy); enemy.health -= 2;
+                        if (enemy.health <= 0) killEnemy(enemy, eIdx);
                     }
                 });
             });
         }
-        
-        function startGame(savedState = null) {
-            init(savedState);
-            gameRunning = true;
-            gamePaused = false;
-            startScreen.classList.add('hidden');
-            gameOverScreen.classList.add('hidden');
+
+        function killEnemy(enemy, idx) {
+            score += (enemy instanceof Boss ? 1000 : 50);
+            experienceOrbs.push(new ExperienceOrb(enemy.x, enemy.y, enemy instanceof Boss ? 12 : 6, enemy instanceof Boss ? 'gold' : '#00f2ff', enemy instanceof Boss ? 200 : 25));
+            enemies.splice(idx, 1);
+            updateUI();
+        }
+
+        function startGame(saved = null) {
+            init(saved);
+            gameRunning = true; gamePaused = false;
+            startScreen.classList.add('hidden'); gameOverScreen.classList.add('hidden');
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
             animate();
         }
@@ -681,68 +555,27 @@
         function endGame() {
             gameRunning = false;
             cancelAnimationFrame(animationFrameId);
-            [enemySpawnInterval, shootInterval, difficultyInterval, aoeInterval, bossWaveInterval, turretInterval].forEach(clearInterval);
-            
-            // Clear any remaining turret shooting intervals
-            turrets.forEach(t => t.destroy());
-
+            [enemySpawnInterval, shootInterval, difficultyInterval, aoeInterval, bossWaveInterval, turretInterval, magnetInterval].forEach(clearInterval);
             finalScore.textContent = score;
-            gameOverScreen.classList.remove('hidden');
-            gameOverScreen.classList.add('flex');
+            gameOverScreen.classList.remove('hidden'); gameOverScreen.classList.add('flex');
         }
 
         function saveGame() {
-            if (!gameRunning) return;
-            const gameState = {
-                player: player,
-                playerSkills: playerSkills,
-                score: score,
-                enemies: enemies.map(e => ({
-                    x: e.x, y: e.y, radius: e.radius, color: e.color, health: e.health,
-                    type: e instanceof Boss ? 'boss' : 'enemy'
-                })),
-                experienceOrbs: experienceOrbs.map(orb => ({
-                    x: orb.x, y: orb.y, radius: orb.radius, color: orb.color, xpValue: orb.xpValue
-                })),
-                turrets: turrets.map(t => ({
-                    x: t.x, y: t.y, life: t.life
-                }))
-            };
-            localStorage.setItem('survivorGameSave', JSON.stringify(gameState));
-            
-            saveMessage.classList.remove('hidden');
-            setTimeout(() => {
-                saveMessage.classList.add('hidden');
-            }, 1500);
+            const data = { player, playerSkills, score, enemies: enemies.map(e => ({x:e.x, y:e.y, radius:e.radius, color:e.color, health:e.health, type: e instanceof Boss ? 'boss' : 'enemy'})), experienceOrbs };
+            localStorage.setItem('survivorSaveMap', JSON.stringify(data));
+            saveMessage.classList.remove('hidden'); setTimeout(() => saveMessage.classList.add('hidden'), 1500);
         }
 
         function loadGame() {
-            const savedData = localStorage.getItem('survivorGameSave');
-            if (savedData) {
-                startGame(JSON.parse(savedData));
-            }
-        }
-        
-        function checkSaveFile() {
-             if (!localStorage.getItem('survivorGameSave')) {
-                loadButton.disabled = true;
-                loadButton.classList.add('opacity-50', 'cursor-not-allowed');
-            } else {
-                loadButton.disabled = false;
-                loadButton.classList.remove('opacity-50', 'cursor-not-allowed');
-            }
+            const saved = localStorage.getItem('survivorSaveMap');
+            if (saved) startGame(JSON.parse(saved));
         }
 
-        startButton.addEventListener('click', () => startGame());
-        restartButton.addEventListener('click', () => startGame());
-        saveButton.addEventListener('click', saveGame);
-        loadButton.addEventListener('click', loadGame);
-
-        // 頁面載入時檢查是否有存檔
-        window.onload = checkSaveFile;
-
+        startButton.onclick = () => startGame();
+        restartButton.onclick = () => startGame();
+        saveButton.onclick = saveGame;
+        loadButton.onclick = loadGame;
+        if (!localStorage.getItem('survivorSaveMap')) { loadButton.classList.add('opacity-50', 'cursor-not-allowed'); loadButton.disabled = true; }
     </script>
 </body>
 </html>
-
-

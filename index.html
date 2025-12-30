@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極限倖存者：無限火力 - 帳號聯網版</title>
+    <title>極限倖存者：聯網競技版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; overflow: hidden; }
@@ -20,8 +20,8 @@
             pointer-events: none; text-transform: uppercase; letter-spacing: 0.5rem;
             animation: boss-alert 1s infinite alternate; display: none;
         }
+        @keyframes boss-alert { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1.1); } }
         
-        .save-indicator { position: fixed; bottom: 1rem; right: 1rem; font-size: 0.75rem; color: #4ade80; opacity: 0; transition: opacity 0.5s; z-index: 100; }
         #bossHpContainer { 
             position: absolute; top: 40px; left: 20%; width: 60%; height: 12px; 
             background: #450a0a; border: 2px solid #ef4444; border-radius: 6px; 
@@ -29,13 +29,15 @@
         }
         #bossHpBar { width: 100%; height: 100%; background: #ef4444; transition: width 0.1s; }
         
-        .custom-scroll::-webkit-scrollbar { width: 4px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .save-indicator { position: fixed; bottom: 1rem; right: 1rem; font-size: 0.75rem; color: #4ade80; opacity: 0; transition: opacity 0.5s; z-index: 100; }
+        .modal { backdrop-filter: blur(8px); }
+        .scroll-custom::-webkit-scrollbar { width: 6px; }
+        .scroll-custom::-webkit-scrollbar-track { background: transparent; }
+        .scroll-custom::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
 
-        /* 強制提升 Modal 層級並確保 pointer-events 正常 */
+        /* Modal Z-Index Fix */
         #authModal { z-index: 10000 !important; }
-        #authBtn { cursor: pointer !important; pointer-events: auto !important; position: relative; z-index: 60; }
+        #authBtn, #btnExitGame { cursor: pointer; pointer-events: auto; }
     </style>
 </head>
 <body class="flex items-center justify-center h-screen m-0">
@@ -48,117 +50,187 @@
     <div class="relative w-full h-full">
         <canvas id="gameCanvas"></canvas>
         <div class="hud top-4 left-4 text-green-400 font-bold" id="hpUI">HP: 100 / 100</div>
-        <div class="hud top-4 right-4 text-yellow-400 font-bold" id="scoreUI">SCORE: 0</div>
-        <div class="hud top-12 left-1/2 -translate-x-1/2 text-slate-500 text-xs" id="levelUI">LEVEL 1</div>
+        
+        <div class="hud top-16 right-4 text-yellow-400 font-bold text-right">
+            <div id="scoreUI">SCORE: 0</div>
+            <div id="stageTargetUI" class="text-xs text-slate-400">TARGET: 1000</div>
+        </div>
+        
+        <button id="btnExitGame" onclick="confirmExit()" class="absolute top-4 right-4 bg-red-900/50 hover:bg-red-600 text-white px-4 py-1 rounded border border-red-500/50 transition-colors text-xs font-bold z-20">
+            退出戰鬥 ✕
+        </button>
+
+        <div class="hud top-12 left-1/2 -translate-x-1/2 text-center">
+            <div id="stageUI" class="text-blue-400 font-black text-xl">STAGE 1</div>
+            <div id="levelUI" class="text-slate-500 text-xs uppercase">LEVEL 1</div>
+        </div>
+        <div id="userDisplay" class="hud bottom-4 left-4 text-[10px] text-slate-600 font-mono">User: Loading...</div>
     </div>
 
     <!-- 初始主選單 -->
-    <div id="startMenu" class="absolute inset-0 bg-slate-900/95 flex flex-col md:flex-row items-center justify-center z-50 p-8 gap-8">
+    <div id="startMenu" class="absolute inset-0 bg-slate-900/95 flex flex-col md:flex-row items-center justify-center z-50 p-8 gap-8 modal">
         <div class="flex flex-col items-center max-w-md w-full">
-            <h1 class="text-5xl font-black mb-2 text-blue-500 text-center uppercase tracking-tighter italic">Survivor<br><span class="text-2xl text-red-500 not-italic">Elite Ops Online</span></h1>
+            <h1 class="text-6xl font-black mb-2 text-blue-500 text-center uppercase tracking-tighter italic">Survivor<br><span class="text-3xl text-red-500 not-italic font-sans">Online Ops</span></h1>
             
-            <div id="userStats" class="mb-6 w-full bg-slate-800 p-5 rounded-2xl border border-slate-700 shadow-xl">
+            <!-- 帳號資訊區 -->
+            <div id="userStats" class="mb-4 w-full bg-slate-800 p-5 rounded-2xl border border-slate-700 shadow-xl">
                 <div class="flex justify-between items-start mb-4">
                     <div class="text-left">
                         <p class="text-slate-500 text-[10px] uppercase font-bold tracking-widest">特種兵編號</p>
-                        <p id="userIdDisplay" class="text-slate-300 font-mono text-xs truncate w-32">載入中...</p>
+                        <p id="userIdDisplayInfo" class="text-slate-300 font-mono text-xs truncate w-32">連線中...</p>
                     </div>
-                    <!-- 使用強制 onclick 確保事件觸發 -->
-                    <button id="authBtn" onclick="handleAuthButtonClick()" class="text-[10px] bg-slate-700 hover:bg-blue-600 px-3 py-2 rounded-lg transition-colors uppercase font-bold text-white shadow-lg">登入/註冊</button>
+                    <button id="authBtn" onclick="handleAuthButtonClick()" class="text-[10px] bg-slate-700 hover:bg-blue-600 px-3 py-1 rounded transition-colors uppercase font-bold text-white shadow-md">登入/註冊</button>
                 </div>
                 <div class="flex justify-around items-center border-t border-slate-700 pt-4">
                     <div class="text-center">
-                        <p class="text-slate-500 text-[10px]">雲端最高分</p>
-                        <p id="highScoreText" class="text-yellow-400 font-black text-xl">0</p>
+                        <p class="text-blue-400 text-[10px]">關卡進度</p>
+                        <p id="saveStage" class="text-2xl font-black">1</p>
                     </div>
                     <div class="text-center">
-                        <p class="text-slate-500 text-[10px]">目前狀態</p>
-                        <p id="authStatusText" class="text-green-500 text-xs font-bold">掃描中...</p>
+                        <p class="text-yellow-400 text-[10px]">歷史最高</p>
+                        <p id="saveHighScore" class="text-2xl font-black">0</p>
                     </div>
                 </div>
             </div>
 
-            <button id="btnStart" class="w-full bg-blue-600 hover:bg-blue-500 px-12 py-4 rounded-full text-2xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/50 mb-4">開始作戰</button>
+            <div class="flex flex-col w-full gap-3">
+                <button id="btnStart" class="w-full bg-blue-600 hover:bg-blue-500 px-12 py-4 rounded-2xl text-2xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/30">開始新遊戲</button>
+                <button id="btnContinue" class="hidden w-full bg-emerald-600 hover:bg-emerald-500 px-12 py-3 rounded-2xl text-xl font-bold transition-all transform hover:scale-105">繼續上次進度</button>
+                <button id="btnLog" class="w-full bg-slate-700 hover:bg-slate-600 px-12 py-3 rounded-2xl text-lg font-bold transition-all">更新日誌</button>
+            </div>
         </div>
 
-        <!-- 排行榜 -->
-        <div class="bg-slate-800/50 border border-slate-700 rounded-2xl w-full max-w-xs h-[400px] flex flex-col overflow-hidden">
-            <div class="bg-slate-700/50 p-3 text-center font-bold text-sm border-b border-slate-600">全球英雄榜 (TOP 20)</div>
-            <div id="leaderboardList" class="flex-1 overflow-y-auto p-2 custom-scroll space-y-2">
-                <div class="text-center text-slate-500 py-10 text-xs animate-pulse">連線至戰略指揮部...</div>
+        <!-- 排行榜面板 -->
+        <div class="bg-slate-800/80 border border-slate-700 rounded-2xl w-full max-w-xs h-[450px] flex flex-col overflow-hidden shadow-2xl backdrop-blur-sm">
+            <div class="bg-slate-700/50 p-3 text-center font-bold text-sm border-b border-slate-600 flex justify-between items-center px-4">
+                <span>🏆 全球英雄榜</span>
+                <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">TOP 20</span>
+            </div>
+            <div id="leaderboardList" class="flex-1 overflow-y-auto p-2 scroll-custom space-y-2">
+                <div class="text-center text-slate-500 py-10 text-xs animate-pulse">正在連接戰略網路...</div>
             </div>
         </div>
     </div>
 
-    <!-- 登入視窗：移出主選單容器，獨立於 body 下 -->
-    <div id="authModal" class="hidden fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4">
+    <!-- 登入視窗 -->
+    <div id="authModal" class="hidden fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4 z-[10000]">
         <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 w-full max-w-sm shadow-2xl relative">
-            <h3 id="modalTitle" class="text-2xl font-bold mb-6 text-center">軍事基地准入</h3>
+            <h3 id="modalTitle" class="text-2xl font-bold mb-6 text-center text-white">軍事基地准入</h3>
             <div class="space-y-4">
                 <div>
                     <label class="block text-[10px] text-slate-500 mb-1 uppercase">電子郵件</label>
-                    <input type="email" id="emailInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white" placeholder="pilot@elite.ops">
+                    <input type="email" id="emailInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white placeholder-slate-600" placeholder="pilot@elite.ops">
                 </div>
                 <div>
                     <label class="block text-[10px] text-slate-500 mb-1 uppercase">通訊密碼</label>
-                    <input type="password" id="passwordInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white" placeholder="••••••••">
+                    <input type="password" id="passwordInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white placeholder-slate-600" placeholder="••••••••">
                 </div>
                 <div id="authError" class="text-red-500 text-[10px] text-center hidden"></div>
                 <button id="submitAuth" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold transition-colors mt-4 text-white">確認身分</button>
-                <button id="toggleAuthMode" class="w-full text-slate-500 text-[10px] hover:text-slate-300">還沒有帳號？申請加入特種部隊</button>
-                <button id="closeAuth" class="w-full text-slate-600 text-[10px] pt-2">取消並繼續</button>
+                <button id="toggleAuthMode" class="w-full text-slate-500 text-[10px] hover:text-slate-300 transition-colors">還沒有帳號？申請加入特種部隊</button>
+                <button id="closeAuth" class="w-full text-slate-600 text-[10px] pt-2 hover:text-slate-400">取消</button>
             </div>
+        </div>
+    </div>
+
+    <!-- 更新日誌彈窗 -->
+    <div id="logModal" class="hidden absolute inset-0 bg-slate-950/90 flex items-center justify-center z-[60] p-6 modal">
+        <div class="bg-slate-800 w-full max-w-lg rounded-3xl border border-slate-700 p-8 shadow-2xl flex flex-col max-h-[80vh]">
+            <h2 class="text-2xl font-bold text-blue-400 mb-6 flex items-center gap-2"><span>📋</span> 更新日誌</h2>
+            <div class="overflow-y-auto scroll-custom flex-1 space-y-6 pr-2">
+                <div class="border-l-4 border-yellow-500 pl-4">
+                    <h3 class="font-bold text-white">v1.4.0 - 聯網競技</h3>
+                    <p class="text-sm text-slate-400">● 恢復帳號登入與註冊功能。</p>
+                    <p class="text-sm text-slate-400">● 全球排行榜回歸，即時同步最高分。</p>
+                </div>
+                <div class="border-l-4 border-blue-500 pl-4">
+                    <h3 class="font-bold text-white">v1.3.0 - 關卡擴張</h3>
+                    <p class="text-sm text-slate-400">● 增加關卡模式與進度存檔。</p>
+                </div>
+                <div class="border-l-4 border-green-500 pl-4">
+                    <h3 class="font-bold text-white">v1.2.0 - 補給更新</h3>
+                    <p class="text-sm text-slate-400">● 增加補血包掉落與 Web Audio 音效。</p>
+                </div>
+            </div>
+            <button id="btnCloseLog" class="mt-8 w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition-all">返回選單</button>
+        </div>
+    </div>
+
+    <!-- 關卡結算 -->
+    <div id="stageClearMenu" class="hidden absolute inset-0 bg-blue-900/90 flex flex-col items-center justify-center z-45 modal">
+        <h2 class="text-5xl font-black mb-4 text-white text-center">關卡突破！</h2>
+        <p id="clearBonusText" class="text-yellow-400 text-xl mb-8">獲得關卡獎勵：全屬性提升</p>
+        <div class="flex gap-4">
+            <button id="btnMenuFromClear" class="bg-slate-700 hover:bg-slate-600 text-white px-8 py-3 rounded-full text-xl font-bold transition-transform">返回選單</button>
+            <button id="btnNextStage" class="bg-white text-blue-900 px-12 py-3 rounded-full text-xl font-bold hover:scale-105 transition-transform">進入下一關</button>
         </div>
     </div>
 
     <!-- 升級介面 -->
-    <div id="upgradeMenu" class="hidden fixed inset-0 bg-slate-950/90 flex flex-col items-center justify-center z-[200]">
-        <h2 class="text-4xl font-black mb-8 text-blue-400">火力進階！選擇更強的強化</h2>
-        <div id="upgradeOptions" class="flex gap-6"></div>
+    <div id="upgradeMenu" class="hidden absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center z-40 modal">
+        <h2 class="text-4xl font-black mb-8 text-blue-400 text-center px-4">火力進階！選擇強化項目</h2>
+        <div id="upgradeOptions" class="flex flex-wrap justify-center gap-6"></div>
     </div>
 
     <!-- 結束介面 -->
-    <div id="deathMenu" class="hidden fixed inset-0 bg-red-950/90 flex flex-col items-center justify-center z-[300]">
-        <h1 class="text-6xl font-black mb-4 text-white uppercase italic">K.I.A.</h1>
-        <p id="finalScore" class="text-2xl mb-2 text-red-200 font-mono">SCORE: 0</p>
-        <p id="newRecordText" class="text-yellow-400 font-bold mb-8 opacity-0">NEW WORLD RECORD!</p>
-        <button onclick="location.reload()" class="bg-white text-red-900 px-10 py-3 rounded-full font-bold shadow-xl hover:bg-slate-200">重返戰場</button>
+    <div id="deathMenu" class="hidden absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center z-50 modal">
+        <h1 class="text-7xl font-black mb-4 text-white uppercase italic">任務失敗</h1>
+        <p id="finalScore" class="text-3xl mb-4 text-red-200 font-mono">SCORE: 0</p>
+        <p id="newRecordText" class="text-yellow-400 font-bold mb-8 opacity-0 animate-bounce">NEW WORLD RECORD!</p>
+        <div class="flex gap-4">
+            <button id="btnMenuFromDeath" class="bg-slate-700 hover:bg-slate-600 text-white px-8 py-3 rounded-full text-xl font-bold transition-transform">返回選單</button>
+            <button onclick="location.reload()" class="bg-white text-red-900 px-12 py-3 rounded-full text-xl font-bold shadow-xl hover:bg-slate-200 transition-transform hover:scale-105">重啟戰場</button>
+        </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, query, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, query, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // --- Firebase 初始化 ---
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'survivor-elite-v3';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'survivor-elite-online';
 
         let currentUser = null;
-        let userSaveData = { highScore: 0 };
+        let userSaveData = { highScore: 0, currentStage: 1, upgrades: {} };
         let isSignUpMode = false;
 
-        // 將函式暴露給全域以利 onclick 調用
+        // --- Auth 與 UI 交互 ---
         window.handleAuthButtonClick = () => {
-            console.log("Auth Button Clicked");
             if (currentUser && !currentUser.isAnonymous) {
                 signOut(auth).then(() => window.location.reload());
             } else {
-                const modal = document.getElementById('authModal');
-                modal.classList.remove('hidden');
-                console.log("Modal Unhidden:", modal.classList);
+                document.getElementById('authModal').classList.remove('hidden');
             }
         };
 
+        window.confirmExit = () => {
+            if(confirm("確定要退出當前戰鬥返回主選單嗎？未保存的關卡進度將會遺失。")) {
+                returnToMenu();
+            }
+        };
+
+        function returnToMenu() {
+            gameActive = false;
+            document.getElementById('deathMenu').classList.add('hidden');
+            document.getElementById('stageClearMenu').classList.add('hidden');
+            document.getElementById('bossWarning').style.display = 'none';
+            document.getElementById('bossHpContainer').style.display = 'none';
+            document.getElementById('startMenu').classList.remove('hidden');
+            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; activeBoss = null;
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
-            const authModal = document.getElementById('authModal');
             const toggleAuthMode = document.getElementById('toggleAuthMode');
             const submitAuth = document.getElementById('submitAuth');
             const closeAuth = document.getElementById('closeAuth');
+            const authError = document.getElementById('authError');
 
-            closeAuth.onclick = () => authModal.classList.add('hidden');
+            closeAuth.onclick = () => document.getElementById('authModal').classList.add('hidden');
 
             toggleAuthMode.onclick = () => {
                 isSignUpMode = !isSignUpMode;
@@ -170,17 +242,10 @@
             submitAuth.onclick = async () => {
                 const email = document.getElementById('emailInput').value;
                 const pass = document.getElementById('passwordInput').value;
-                const errorEl = document.getElementById('authError');
+                if(!email || !pass) { authError.textContent = "請輸入完整資訊"; authError.classList.remove('hidden'); return; }
                 
-                if(!email || !pass) {
-                    errorEl.textContent = "請輸入完整電郵與密碼";
-                    errorEl.classList.remove('hidden');
-                    return;
-                }
-
-                errorEl.classList.add('hidden');
-                submitAuth.disabled = true;
-                submitAuth.textContent = "驗證中...";
+                authError.classList.add('hidden');
+                submitAuth.disabled = true; submitAuth.textContent = "通訊中...";
 
                 try {
                     if (isSignUpMode) {
@@ -188,21 +253,26 @@
                     } else {
                         await signInWithEmailAndPassword(auth, email, pass);
                     }
-                    authModal.classList.add('hidden');
+                    document.getElementById('authModal').classList.add('hidden');
                 } catch (error) {
-                    errorEl.textContent = "驗證失敗：帳號重複或密碼太短";
-                    errorEl.classList.remove('hidden');
+                    authError.textContent = "驗證失敗：" + error.message;
+                    authError.classList.remove('hidden');
                 } finally {
-                    submitAuth.disabled = false;
-                    submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
+                    submitAuth.disabled = false; submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
                 }
             };
+            
+            document.getElementById('btnMenuFromDeath').onclick = returnToMenu;
+            document.getElementById('btnMenuFromClear').onclick = returnToMenu;
         });
 
-        // Firebase Auth 監聽
         const initAuth = async () => {
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+                try {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } catch(e) {
+                    await signInAnonymously(auth);
+                }
             } else {
                 await signInAnonymously(auth);
             }
@@ -211,79 +281,107 @@
         onAuthStateChanged(auth, async (user) => {
             currentUser = user;
             if (user) {
-                document.getElementById('userIdDisplay').textContent = user.uid;
                 const isAnon = user.isAnonymous;
-                document.getElementById('authStatusText').textContent = isAnon ? "訪客模式" : "正式成員";
-                document.getElementById('authStatusText').className = isAnon ? "text-slate-500 text-xs font-bold" : "text-blue-400 text-xs font-bold";
-                document.getElementById('authBtn').textContent = isAnon ? "登入/註冊" : "登出帳號";
-                await loadGameProgress();
+                const userDisplayEl = document.getElementById('userDisplay');
+                if (userDisplayEl) userDisplayEl.textContent = `User: ${user.uid}`;
+                const userInfoEl = document.getElementById('userIdDisplayInfo');
+                if (userInfoEl) userInfoEl.textContent = user.uid;
+                const authBtn = document.getElementById('authBtn');
+                if (authBtn) authBtn.textContent = isAnon ? "登入/註冊" : "登出帳號";
+                await loadGameData();
                 setupLeaderboardListener();
             }
         });
 
         initAuth();
 
-        async function loadGameProgress() {
+        async function loadGameData() {
             if (!currentUser) return;
-            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'progress');
+            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'main');
             try {
                 const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) { userSaveData = docSnap.data(); }
-                document.getElementById('highScoreText').textContent = userSaveData.highScore || 0;
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    userSaveData = data;
+                    highScore = data.highScore || 0;
+                    document.getElementById('saveStage').textContent = data.currentStage || 1;
+                    document.getElementById('saveHighScore').textContent = highScore;
+                    if (data.currentStage > 1) document.getElementById('btnContinue').classList.remove('hidden');
+                } else {
+                    await setDoc(docRef, userSaveData);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function saveGameData(finalScore) {
+            if (!currentUser) return;
+            if (finalScore > (userSaveData.highScore || 0)) {
+                userSaveData.highScore = finalScore;
+                document.getElementById('newRecordText').style.opacity = 1;
+                try {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', currentUser.uid), {
+                        uid: currentUser.uid, score: finalScore, updatedAt: serverTimestamp()
+                    });
+                } catch(e) {}
+            }
+            userSaveData.currentStage = currentStage;
+            userSaveData.upgrades = UPGRADES;
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'main'), userSaveData, { merge: true });
+                showSaveIndicator();
             } catch (e) { console.error(e); }
         }
 
         function setupLeaderboardListener() {
-            const leaderboardCol = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
-            onSnapshot(leaderboardCol, (snapshot) => {
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard'), snapshot => {
                 const listEl = document.getElementById('leaderboardList');
                 let scores = [];
                 snapshot.forEach(doc => scores.push(doc.data()));
                 scores.sort((a, b) => b.score - a.score);
                 scores = scores.slice(0, 20);
                 listEl.innerHTML = '';
+                if (scores.length === 0) { listEl.innerHTML = '<div class="text-slate-600 text-center py-10 text-xs">尚無戰鬥紀錄</div>'; return; }
                 scores.forEach((item, idx) => {
                     const isMe = currentUser && item.uid === currentUser.uid;
                     const row = document.createElement('div');
                     row.className = `flex items-center justify-between p-2 rounded-lg text-xs ${isMe ? 'bg-blue-900/40 border border-blue-500/50' : 'bg-slate-700/30'}`;
-                    row.innerHTML = `<div class="flex items-center gap-2 truncate"><span class="font-bold w-4 text-slate-500">${idx+1}</span><span class="truncate text-slate-300 font-mono">${item.uid.substring(0,8)}</span></div><span class="font-bold text-blue-400">${item.score}</span>`;
+                    row.innerHTML = `<div class="flex items-center gap-2 truncate"><span class="font-bold w-4 ${idx<3?'text-yellow-400':'text-slate-500'}">${idx+1}</span><span class="truncate text-slate-300 font-mono">${item.uid.substring(0,8)}</span></div><span class="font-bold text-blue-400">${item.score}</span>`;
                     listEl.appendChild(row);
                 });
-            }, (err) => console.log("LB Err:", err));
+            }, err => console.log(err));
         }
 
-        async function saveGameProgress(newScore) {
-            if (!currentUser) return;
-            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'progress');
-            if (newScore > (userSaveData.highScore || 0)) {
-                userSaveData.highScore = newScore;
-                document.getElementById('newRecordText').style.opacity = 1;
-                try {
-                    await setDoc(docRef, { highScore: newScore }, { merge: true });
-                    const leaderboardDoc = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', currentUser.uid);
-                    await setDoc(leaderboardDoc, { uid: currentUser.uid, score: newScore, updatedAt: Date.now() });
-                    document.getElementById('saveIndicator').style.opacity = 1;
-                    setTimeout(() => document.getElementById('saveIndicator').style.opacity = 0, 2000);
-                } catch (e) { console.error(e); }
-            }
+        function showSaveIndicator() {
+            const el = document.getElementById('saveIndicator'); el.style.opacity = 1; setTimeout(() => el.style.opacity = 0, 2000);
         }
 
-        // --- 遊戲邏輯簡化版 (確保順暢) ---
+        // --- Game Engine ---
+        const gameConfig = { width: window.innerWidth, height: window.innerHeight };
         const audio = new (window.AudioContext || window.webkitAudioContext)();
         function playSfx(f, t, d, v=0.03) {
-            try { if (audio.state === 'suspended') audio.resume(); const o = audio.createOscillator(); const g = audio.createGain(); o.type = t; o.frequency.setValueAtTime(f, audio.currentTime); g.gain.setValueAtTime(v, audio.currentTime); g.gain.exponentialRampToValueAtTime(0.01, audio.currentTime+d); o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime+d); } catch(e) {}
+            try {
+                if (audio.state === 'suspended') audio.resume();
+                const o = audio.createOscillator(); const g = audio.createGain();
+                o.type = t; o.frequency.setValueAtTime(f, audio.currentTime);
+                g.gain.setValueAtTime(v, audio.currentTime); g.gain.exponentialRampToValueAtTime(0.01, audio.currentTime+d);
+                o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime+d);
+            } catch(e) {}
         }
 
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        let w, h, player, gameActive = false, frame = 0, score = 0, shootTimer = 0, activeBoss = null;
-        let enemies = [], bullets = [], orbs = [], bossBullets = [];
+        
+        let player, gameActive = false, frame = 0, score = 0, shootTimer = 0, activeBoss = null;
+        let enemies = [], bullets = [], orbs = [], bossBullets = [], medkits = [];
+        let currentStage = 1, highScore = 0;
 
         const camera = {
-            x: 0, y: 0, zoom: 1, update: function(tx, ty) {
-                const tz = Math.max(0.4, 1 - (player.lv - 1) * 0.04);
-                this.zoom += (tz - this.zoom) * 0.05;
-                this.x = tx - (w/2)/this.zoom; this.y = ty - (h/2)/this.zoom;
+            x: 0, y: 0, zoom: 1, targetZoom: 1,
+            update: function(tx, ty) {
+                this.targetZoom = Math.max(0.4, 1 - (player.lv - 1) * 0.04);
+                this.zoom += (this.targetZoom - this.zoom) * 0.05;
+                this.x = tx - (gameConfig.width / 2) / this.zoom; 
+                this.y = ty - (gameConfig.height / 2) / this.zoom;
             },
             toScreen: function(wx, wy) { return { x: (wx - this.x) * this.zoom, y: (wy - this.y) * this.zoom }; }
         };
@@ -296,7 +394,9 @@
             magnet: { name: "全圖拾取", desc: "磁力擴張", icon: "🪐", level: 0 }
         };
 
-        function initCanvas() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
+        function getStageTarget(s) { return s * 1500 + (s-1)*(s-1)*500; }
+
+        function initCanvas() { gameConfig.width = canvas.width = window.innerWidth; gameConfig.height = canvas.height = window.innerHeight; }
         window.addEventListener('resize', initCanvas); initCanvas();
 
         const keys = {};
@@ -304,46 +404,166 @@
         window.addEventListener('keyup', e => keys[e.code] = false);
 
         class Player {
-            constructor() { this.x = 0; this.y = 0; this.r = 15; this.hp = 100; this.maxHp = 100; this.xp = 0; this.lv = 1; this.nextXp = 50; this.speed = 4.5; this.pickupR = 100; this.damage = 25; this.fireRate = 20; this.bulletCount = 1; }
+            constructor() {
+                this.x = 0; this.y = 0; this.r = 15; this.hp = 100; this.maxHp = 100;
+                this.xp = 0; this.lv = 1; this.nextXp = 50; 
+                this.speed = 4.5 + (UPGRADES.speed.level * 0.5);
+                this.pickupR = 100 + (UPGRADES.magnet.level * 60); 
+                this.damage = 25 + (UPGRADES.damage.level * 15); 
+                this.fireRate = Math.max(5, 20 - (UPGRADES.fireRate.level * 3)); 
+                this.bulletCount = 1 + UPGRADES.bullets.level;
+            }
             update() {
-                if (keys['KeyW'] || keys['ArrowUp']) this.y -= this.speed; if (keys['KeyS'] || keys['ArrowDown']) this.y += this.speed;
-                if (keys['KeyA'] || keys['ArrowLeft']) this.x -= this.speed; if (keys['KeyD'] || keys['ArrowRight']) this.x += this.speed;
+                if (keys['KeyW'] || keys['ArrowUp']) this.y -= this.speed;
+                if (keys['KeyS'] || keys['ArrowDown']) this.y += this.speed;
+                if (keys['KeyA'] || keys['ArrowLeft']) this.x -= this.speed;
+                if (keys['KeyD'] || keys['ArrowRight']) this.x += this.speed;
                 shootTimer++; if (shootTimer >= this.fireRate) { this.shoot(); shootTimer = 0; }
             }
             shoot() {
                 let target = activeBoss || null;
-                if (!target) { let minDist = 1000; enemies.forEach(e => { const d = Math.hypot(e.x - this.x, e.y - this.y); if (d < minDist) { minDist = d; target = e; } }); }
+                if (!target) {
+                    let minDist = 1000;
+                    enemies.forEach(e => { const d = Math.hypot(e.x - this.x, e.y - this.y); if (d < minDist) { minDist = d; target = e; } });
+                }
                 const angle = target ? Math.atan2(target.y - this.y, target.x - this.x) : -Math.PI/2;
-                for (let i = 0; i < this.bulletCount; i++) { const offset = (i - (this.bulletCount - 1) / 2) * 0.3; bullets.push(new Bullet(this.x, this.y, angle + offset, this.damage)); }
+                for (let i = 0; i < this.bulletCount; i++) {
+                    const offset = (i - (this.bulletCount - 1) / 2) * 0.3;
+                    bullets.push(new Bullet(this.x, this.y, angle + offset, this.damage));
+                }
                 playSfx(400, 'square', 0.05, 0.02);
             }
-            draw() { const pos = camera.toScreen(this.x, this.y); ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom); ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2); ctx.fillStyle = '#3b82f6'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore(); }
+            draw() {
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom);
+                ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2);
+                ctx.fillStyle = '#3b82f6'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.restore();
+            }
         }
 
-        class Bullet { constructor(x, y, a, d) { this.x = x; this.y = y; this.dmg = d; this.vx = Math.cos(a) * 12; this.vy = Math.sin(a) * 12; this.r = 3.5; } update() { this.x += this.vx; this.y += this.vy; } draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#60a5fa'; ctx.fill(); } }
-        class Enemy { constructor() { const a = Math.random() * Math.PI * 2; this.x = player.x + Math.cos(a) * (850 / camera.zoom); this.y = player.y + Math.sin(a) * (850 / camera.zoom); this.r = 12 + Math.random() * 8; this.hp = 20 + player.lv * 12; this.speed = 1.2 + Math.random(); } update() { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; } draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#ef4444'; ctx.fill(); } }
-        class Orb { constructor(x, y, v=10) { this.x = x; this.y = y; this.r = 4; this.val = v; } update() { const d = Math.hypot(player.x - this.x, player.y - this.y); if (d < player.pickupR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*10; this.y += Math.sin(a)*10; } } draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = this.val > 50 ? '#8b5cf6' : '#fbbf24'; ctx.fill(); } }
+        class Bullet {
+            constructor(x, y, a, d) { this.x = x; this.y = y; this.dmg = d; this.vx = Math.cos(a)*12; this.vy = Math.sin(a)*12; this.r = 3.5; }
+            update() { this.x += this.vx; this.y += this.vy; }
+            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#60a5fa'; ctx.fill(); }
+        }
+
+        class Enemy {
+            constructor() {
+                const angle = Math.random() * Math.PI * 2;
+                this.x = player.x + Math.cos(angle) * (850 / camera.zoom);
+                this.y = player.y + Math.sin(angle) * (850 / camera.zoom);
+                const stageMod = 1 + (currentStage - 1) * 0.2;
+                this.r = 12 + Math.random() * 8; this.hp = (20 + player.lv * 12) * stageMod; this.speed = (1.2 + Math.random()) * stageMod;
+            }
+            update() { const angle = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(angle) * this.speed; this.y += Math.sin(angle) * this.speed; }
+            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#ef4444'; ctx.fill(); }
+        }
+
+        class Medkit {
+            constructor(x, y) { this.x = x; this.y = y; this.r = 12; this.heal = 30; }
+            update() { const d = Math.hypot(player.x - this.x, player.y - this.y); if (d < player.pickupR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*8; this.y += Math.sin(a)*8; } }
+            draw() { const pos = camera.toScreen(this.x, this.y); ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom); ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.roundRect(-10, -10, 20, 20, 4); ctx.fill(); ctx.fillStyle = 'white'; ctx.fillRect(-2, -7, 4, 14); ctx.fillRect(-7, -2, 14, 4); ctx.restore(); }
+        }
+
+        class Boss {
+            constructor(lv) {
+                this.x = player.x + 600; this.y = player.y; this.r = 60;
+                this.maxHp = (2500 + lv * 1200) * (1 + (currentStage-1)*0.5); this.hp = this.maxHp; this.speed = 0.9 + (currentStage*0.1); this.timer = 0;
+            }
+            update() { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; this.timer++; if (this.timer > 100) { this.attack(); this.timer = 0; } }
+            attack() { for (let i=0; i<20; i++) bossBullets.push(new BossBullet(this.x, this.y, (Math.PI*2/20)*i)); }
+            draw() { const pos = camera.toScreen(this.x, this.y); ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom); ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2); ctx.fillStyle = '#7f1d1d'; ctx.fill(); ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.stroke(); ctx.restore(); }
+        }
+
+        class BossBullet {
+            constructor(x, y, a) { this.x = x; this.y = y; this.vx = Math.cos(a)*5; this.vy = Math.sin(a)*5; this.r = 8; }
+            update() { this.x += this.vx; this.y += this.vy; }
+            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#f87171'; ctx.fill(); }
+        }
+
+        class Orb {
+            constructor(x, y, v=10) { this.x = x; this.y = y; this.r = 4; this.val = v; }
+            update() { const d = Math.hypot(player.x - this.x, player.y - this.y); if (d < player.pickupR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*10; this.y += Math.sin(a)*10; } }
+            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = this.val > 50 ? '#8b5cf6' : '#fbbf24'; ctx.fill(); }
+        }
 
         function loop() {
             if (!gameActive) return;
-            ctx.clearRect(0, 0, w, h); frame++; camera.update(player.x, player.y);
+            ctx.clearRect(0, 0, gameConfig.width, gameConfig.height); frame++; camera.update(player.x, player.y);
+            
+            // Grid
+            ctx.beginPath(); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+            const gs = 100 * camera.zoom;
+            for (let x = (-camera.x * camera.zoom) % gs; x < gameConfig.width; x += gs) { ctx.moveTo(x, 0); ctx.lineTo(x, gameConfig.height); }
+            for (let y = (-camera.y * camera.zoom) % gs; y < gameConfig.height; y += gs) { ctx.moveTo(0, y); ctx.lineTo(gameConfig.width, y); }
+            ctx.stroke();
+
             player.update(); player.draw();
-            if (frame % Math.max(5, 30 - player.lv) === 0) enemies.push(new Enemy());
+
+            if (!activeBoss && frame % Math.max(5, 30 - player.lv) === 0) enemies.push(new Enemy());
+            if (activeBoss) {
+                activeBoss.update(); activeBoss.draw();
+                document.getElementById('bossHpBar').style.width = (activeBoss.hp / activeBoss.maxHp * 100) + '%';
+            }
+
             for (let i = bullets.length-1; i>=0; i--) {
                 const b = bullets[i]; b.update(); b.draw();
+                if (activeBoss && Math.hypot(b.x-activeBoss.x, b.y-activeBoss.y) < activeBoss.r+b.r) {
+                    activeBoss.hp -= b.dmg; bullets.splice(i,1);
+                    if (activeBoss.hp <= 0) { score += 1000; activeBoss = null; document.getElementById('bossHpContainer').style.display = 'none'; }
+                    continue;
+                }
                 for (let j = enemies.length-1; j>=0; j--) {
-                    const e = enemies[j]; if (Math.hypot(e.x-b.x, e.y-b.y) < e.r+b.r) { e.hp -= b.dmg; bullets.splice(i,1); if (e.hp <= 0) { score += 15; orbs.push(new Orb(e.x, e.y)); enemies.splice(j,1); } break; }
+                    const e = enemies[j];
+                    if (Math.hypot(e.x-b.x, e.y-b.y) < e.r+b.r) {
+                        e.hp -= b.dmg; bullets.splice(i,1);
+                        if (e.hp <= 0) { 
+                            score += 15; orbs.push(new Orb(e.x, e.y)); 
+                            if (Math.random() < 0.05) medkits.push(new Medkit(e.x, e.y));
+                            enemies.splice(j,1); 
+                        }
+                        break;
+                    }
                 }
             }
+
             for (let i = enemies.length-1; i>=0; i--) {
-                const e = enemies[i]; e.update(); e.draw(); if (Math.hypot(player.x-e.x, player.y-e.y) < player.r+e.r) { player.hp -= 0.5; document.body.classList.add('damage-flash'); setTimeout(() => document.body.classList.remove('damage-flash'), 50); }
+                const e = enemies[i]; e.update(); e.draw();
+                if (Math.hypot(player.x-e.x, player.y-e.y) < player.r+e.r) {
+                    player.hp -= 0.5; document.body.classList.add('damage-flash');
+                    setTimeout(() => document.body.classList.remove('damage-flash'), 50);
+                }
             }
+
             for (let i = orbs.length-1; i>=0; i--) {
-                const o = orbs[i]; o.update(); o.draw(); if (Math.hypot(player.x-o.x, player.y-o.y) < player.r+o.r) { player.xp += o.val; orbs.splice(i,1); if (player.xp >= player.nextXp) { player.lv++; player.xp = 0; player.nextXp *= 1.35; showUpgrade(); return; } }
+                const o = orbs[i]; o.update(); o.draw();
+                if (Math.hypot(player.x-o.x, player.y-o.y) < player.r+o.r) {
+                    player.xp += o.val; orbs.splice(i,1);
+                    if (player.xp >= player.nextXp) { player.lv++; player.xp = 0; player.nextXp *= 1.35; showUpgrade(); }
+                }
             }
-            if (player.hp <= 0) { gameActive = false; document.getElementById('deathMenu').classList.remove('hidden'); document.getElementById('finalScore').textContent = `SCORE: ${score}`; saveGameProgress(score); return; }
+
+            for (let i = medkits.length-1; i>=0; i--) {
+                const m = medkits[i]; m.update(); m.draw();
+                if (Math.hypot(player.x-m.x, player.y-m.y) < player.r+m.r) {
+                    player.hp = Math.min(player.maxHp, player.hp + m.heal);
+                    medkits.splice(i,1); playSfx(800, 'sine', 0.2, 0.05);
+                }
+            }
+
+            const target = getStageTarget(currentStage);
+            if (score >= target) { gameActive = false; document.getElementById('stageClearMenu').classList.remove('hidden'); saveGameData(score); return; }
+            if (player.hp <= 0) {
+                gameActive = false; document.getElementById('deathMenu').classList.remove('hidden');
+                document.getElementById('finalScore').textContent = `SCORE: ${score}`;
+                saveGameData(score); return;
+            }
+
             document.getElementById('hpUI').textContent = `HP: ${Math.ceil(player.hp)} / ${player.maxHp}`;
             document.getElementById('scoreUI').textContent = `SCORE: ${score}`;
+            document.getElementById('stageTargetUI').textContent = `TARGET: ${target}`;
+            document.getElementById('stageUI').textContent = `STAGE ${currentStage}`;
             document.getElementById('levelUI').textContent = `LEVEL ${player.lv}`;
             document.getElementById('xpBar').style.width = (player.xp / player.nextXp * 100) + '%';
             requestAnimationFrame(loop);
@@ -355,18 +575,44 @@
             const picks = Object.keys(UPGRADES).sort(() => 0.5 - Math.random()).slice(0, 3);
             picks.forEach(key => {
                 const up = UPGRADES[key]; const card = document.createElement('div');
-                card.className = "bg-slate-800 p-6 rounded-xl border-2 border-slate-700 hover:border-blue-500 cursor-pointer w-48 text-center transition-all hover:scale-105";
-                card.innerHTML = `<div class="text-4xl mb-4">${up.icon}</div><div class="font-bold text-xl mb-2">${up.name}</div><div class="text-xs text-slate-400">${up.desc}</div>`;
-                card.onclick = () => { UPGRADES[key].level++; if(key==='bullets') player.bulletCount++; if(key==='fireRate') player.fireRate=Math.max(5, player.fireRate-3); if(key==='damage') player.damage+=15; if(key==='speed') player.speed+=0.5; if(key==='magnet') player.pickupR+=60; document.getElementById('upgradeMenu').classList.add('hidden'); gameActive = true; loop(); };
+                card.className = "bg-slate-800 p-6 rounded-xl border-2 border-slate-700 hover:border-blue-500 cursor-pointer w-48 text-center transition-all hover:scale-105 shadow-lg";
+                card.innerHTML = `<div class="text-4xl mb-4">${up.icon}</div><div class="font-bold text-xl mb-2">${up.name}</div><div class="text-xs text-slate-400">${up.desc}</div><div class="mt-4 text-blue-400 font-mono">LV ${up.level}</div>`;
+                card.onclick = () => { applyUpgrade(key); document.getElementById('upgradeMenu').classList.add('hidden'); gameActive = true; if (player.lv % 5 === 0 && !activeBoss) spawnBoss(); loop(); };
                 options.appendChild(card);
             });
         }
 
-        document.getElementById('btnStart').onclick = () => {
+        function applyUpgrade(key) {
+            UPGRADES[key].level++;
+            if (key === 'bullets') player.bulletCount++;
+            if (key === 'fireRate') player.fireRate = Math.max(5, player.fireRate - 3);
+            if (key === 'damage') player.damage += 15;
+            if (key === 'speed') player.speed += 0.5;
+            if (key === 'magnet') player.pickupR += 60;
+            playSfx(600, 'sine', 0.2);
+        }
+
+        function spawnBoss() {
+            document.getElementById('bossWarning').style.display = 'block';
+            setTimeout(() => { document.getElementById('bossWarning').style.display = 'none'; activeBoss = new Boss(player.lv); document.getElementById('bossHpContainer').style.display = 'block'; }, 3000);
+        }
+
+        document.getElementById('btnStart').onclick = () => { currentStage = 1; score = 0; Object.values(UPGRADES).forEach(u => u.level = 0); startGame(); };
+        document.getElementById('btnContinue').onclick = async () => {
+            const data = await loadGameData();
+            if (data) { currentStage = data.currentStage || 1; Object.keys(data.upgrades).forEach(key => { if(UPGRADES[key]) UPGRADES[key].level = data.upgrades[key].level; }); score = getStageTarget(currentStage-1); startGame(); }
+        };
+        document.getElementById('btnNextStage').onclick = () => { currentStage++; document.getElementById('stageClearMenu').classList.add('hidden'); startGame(); };
+        document.getElementById('btnLog').onclick = () => document.getElementById('logModal').classList.remove('hidden');
+        document.getElementById('btnCloseLog').onclick = () => document.getElementById('logModal').classList.add('hidden');
+
+        function startGame() {
             if (audio.state === 'suspended') audio.resume();
             document.getElementById('startMenu').classList.add('hidden');
-            player = new Player(); gameActive = true; loop();
-        };
+            player = new Player(); gameActive = true; frame = 0;
+            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; activeBoss = null;
+            loop();
+        }
     </script>
 </body>
 </html>

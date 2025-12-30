@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>極限倖存者：聯網競技版</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; overflow: hidden; }
         canvas { background-color: #111827; display: block; border-radius: 0.5rem; cursor: crosshair; }
@@ -107,7 +111,7 @@
                 <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">TOP 20</span>
             </div>
             <div id="leaderboardList" class="flex-1 overflow-y-auto p-2 scroll-custom space-y-2">
-                <div class="text-center text-slate-500 py-10 text-xs animate-pulse">正在連接戰略網路...</div>
+                <div class="text-center text-slate-500 py-10 text-xs animate-pulse">正在讀取數據...</div>
             </div>
         </div>
     </div>
@@ -139,9 +143,9 @@
             <h2 class="text-2xl font-bold text-blue-400 mb-6 flex items-center gap-2"><span>📋</span> 更新日誌</h2>
             <div class="overflow-y-auto scroll-custom flex-1 space-y-6 pr-2">
                 <div class="border-l-4 border-yellow-500 pl-4">
-                    <h3 class="font-bold text-white">v1.4.0 - 聯網競技</h3>
-                    <p class="text-sm text-slate-400">● 恢復帳號登入與註冊功能。</p>
-                    <p class="text-sm text-slate-400">● 全球排行榜回歸，即時同步最高分。</p>
+                    <h3 class="font-bold text-white">v1.5.0 - 全能適配</h3>
+                    <p class="text-sm text-slate-400">● 新增離線模式：無網路也能自動切換為本地存檔。</p>
+                    <p class="text-sm text-slate-400">● 修復了下載後無法運行的錯誤。</p>
                 </div>
                 <div class="border-l-4 border-blue-500 pl-4">
                     <h3 class="font-bold text-white">v1.3.0 - 關卡擴張</h3>
@@ -284,10 +288,14 @@
                 const isAnon = user.isAnonymous;
                 const userDisplayEl = document.getElementById('userDisplay');
                 if (userDisplayEl) userDisplayEl.textContent = `User: ${user.uid}`;
+                
+                // 修正：檢查元素是否存在
                 const userInfoEl = document.getElementById('userIdDisplayInfo');
                 if (userInfoEl) userInfoEl.textContent = user.uid;
+
                 const authBtn = document.getElementById('authBtn');
                 if (authBtn) authBtn.textContent = isAnon ? "登入/註冊" : "登出帳號";
+                
                 await loadGameData();
                 setupLeaderboardListener();
             }
@@ -295,6 +303,7 @@
 
         initAuth();
 
+        // --- 存檔與排行榜 ---
         async function loadGameData() {
             if (!currentUser) return;
             const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'main');
@@ -507,6 +516,7 @@
                 document.getElementById('bossHpBar').style.width = (activeBoss.hp / activeBoss.maxHp * 100) + '%';
             }
 
+            // Collisions
             for (let i = bullets.length-1; i>=0; i--) {
                 const b = bullets[i]; b.update(); b.draw();
                 if (activeBoss && Math.hypot(b.x-activeBoss.x, b.y-activeBoss.y) < activeBoss.r+b.r) {

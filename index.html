@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極限倖存者：無限火力 - 雲端存檔版</title>
+    <title>極限倖存者：無限火力 - BOSS 降臨版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; overflow: hidden; }
@@ -16,12 +16,31 @@
         #xpBar { width: 0%; height: 100%; background: #3b82f6; transition: width 0.2s; }
         .damage-flash { animation: flash 0.15s; }
         @keyframes flash { 0% { background: rgba(220, 38, 38, 0.5); } 100% { background: transparent; } }
+        
+        /* BOSS 警告動畫 */
+        .boss-warning { 
+            position: absolute; top: 40%; left: 0; width: 100%; text-align: center;
+            font-size: 5rem; font-weight: 900; color: #ef4444; z-index: 100;
+            pointer-events: none; text-transform: uppercase; letter-spacing: 0.5rem;
+            animation: boss-alert 1s infinite alternate;
+            display: none;
+        }
+        @keyframes boss-alert { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1.1); } }
+        
         .save-indicator { position: fixed; bottom: 1rem; right: 1rem; font-size: 0.75rem; color: #4ade80; opacity: 0; transition: opacity 0.5s; }
+        #bossHpContainer { 
+            position: absolute; top: 40px; left: 20%; width: 60%; height: 12px; 
+            background: #450a0a; border: 2px solid #ef4444; border-radius: 6px; 
+            display: none; z-index: 20;
+        }
+        #bossHpBar { width: 100%; height: 100%; background: #ef4444; transition: width 0.1s; }
     </style>
 </head>
 <body class="flex items-center justify-center h-screen m-0">
 
     <div id="xpBarContainer"><div id="xpBar"></div></div>
+    <div id="bossHpContainer"><div id="bossHpBar"></div></div>
+    <div id="bossWarning" class="boss-warning">BOSS WARNING</div>
     <div id="saveIndicator" class="save-indicator">已同步雲端進度...</div>
 
     <div class="relative w-full h-full">
@@ -29,12 +48,12 @@
         <div class="hud top-4 left-4 text-green-400 font-bold" id="hpUI">HP: 100 / 100</div>
         <div class="hud top-4 right-4 text-yellow-400 font-bold" id="scoreUI">SCORE: 0</div>
         <div class="hud top-12 left-1/2 -translate-x-1/2 text-slate-500 text-xs" id="levelUI">LEVEL 1</div>
-        <div class="hud bottom-4 left-1/2 -translate-x-1/2 text-blue-400 font-bold animate-pulse">雲端存檔功能已啟動</div>
+        <div class="hud bottom-4 left-1/2 -translate-x-1/2 text-red-500 font-bold animate-pulse">BOSS 威脅已加入戰場</div>
     </div>
 
     <!-- 初始介面 -->
     <div id="startMenu" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center z-50">
-        <h1 class="text-6xl font-black mb-2 text-blue-500 text-center">極限生存<br><span class="text-3xl text-yellow-500">雲端存檔版</span></h1>
+        <h1 class="text-6xl font-black mb-2 text-blue-500 text-center">極限生存<br><span class="text-3xl text-red-500">BOSS 降臨</span></h1>
         <div id="userStats" class="mb-8 text-center bg-slate-800 p-4 rounded-xl border border-slate-700">
             <p class="text-slate-400">最高得分: <span id="highScoreText" class="text-yellow-400 font-bold">載入中...</span></p>
             <p class="text-slate-400">當前 UID: <span id="userIdDisplay" class="text-xs text-blue-300">取得中...</span></p>
@@ -56,13 +75,11 @@
         <button onclick="location.reload()" class="bg-white text-red-900 px-10 py-3 rounded-full font-bold shadow-xl">再次挑戰</button>
     </div>
 
-    <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, updateDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase 配置與初始化 (使用環境變數)
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -70,9 +87,8 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'survivor-game-default';
 
         let currentUser = null;
-        let userSaveData = { highScore: 0, totalUpgrades: 0 };
+        let userSaveData = { highScore: 0 };
 
-        // 認證邏輯
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -80,9 +96,7 @@
                 } else {
                     await signInAnonymously(auth);
                 }
-            } catch (error) {
-                console.error("認證失敗:", error);
-            }
+            } catch (error) { console.error("認證失敗:", error); }
         };
 
         onAuthStateChanged(auth, async (user) => {
@@ -95,42 +109,25 @@
 
         initAuth();
 
-        // 存檔與載入功能
         async function loadGameProgress() {
             if (!currentUser) return;
             const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'progress');
             try {
                 const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    userSaveData = docSnap.data();
-                } else {
-                    // 初始存檔
-                    await setDoc(docRef, userSaveData);
-                }
+                if (docSnap.exists()) { userSaveData = docSnap.data(); }
+                else { await setDoc(docRef, userSaveData); }
                 document.getElementById('highScoreText').textContent = userSaveData.highScore;
-            } catch (e) {
-                console.error("載入存檔失敗:", e);
-                document.getElementById('highScoreText').textContent = "0 (本地模式)";
-            }
+            } catch (e) { document.getElementById('highScoreText').textContent = "0"; }
         }
 
         async function saveGameProgress(newScore) {
             if (!currentUser) return;
             const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'progress');
-            
-            let needsUpdate = false;
-            if (newScore > userSaveData.highScore) {
+            if (newScore > (userSaveData.highScore || 0)) {
                 userSaveData.highScore = newScore;
-                needsUpdate = true;
                 document.getElementById('newRecordText').style.opacity = 1;
             }
-
-            try {
-                await setDoc(docRef, userSaveData, { merge: true });
-                showSaveIndicator();
-            } catch (e) {
-                console.error("存檔失敗:", e);
-            }
+            try { await setDoc(docRef, userSaveData, { merge: true }); showSaveIndicator(); } catch (e) {}
         }
 
         function showSaveIndicator() {
@@ -156,18 +153,22 @@
 
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        
         let w, h, player;
         let gameActive = false;
-        let enemies = [], bullets = [], orbs = [], items = [];
-        let frame = 0, score = 0;
-        let shootTimer = 0;
+        let enemies = [], bullets = [], orbs = [], items = [], bossBullets = [];
+        let frame = 0, score = 0, shootTimer = 0;
+        let activeBoss = null;
 
         const camera = {
-            x: 0, y: 0,
+            x: 0, y: 0, zoom: 1, targetZoom: 1,
             update: function(targetX, targetY) {
-                this.x = targetX - w / 2;
-                this.y = targetY - h / 2;
+                this.targetZoom = Math.max(0.4, 1 - (player.lv - 1) * 0.04);
+                this.zoom += (this.targetZoom - this.zoom) * 0.05;
+                this.x = targetX - (w / 2) / this.zoom;
+                this.y = targetY - (h / 2) / this.zoom;
+            },
+            toScreen: function(worldX, worldY) {
+                return { x: (worldX - this.x) * this.zoom, y: (worldY - this.y) * this.zoom };
             }
         };
 
@@ -175,14 +176,11 @@
             bullets: { name: "極限彈道", desc: "再增加 2 條射擊路線", icon: "🚀", level: 5, max: 20 },
             fireRate: { name: "超頻連發", desc: "攻速突破天際", icon: "🔥", level: 5, max: 20 },
             damage: { name: "毀滅彈頭", desc: "傷害翻倍", icon: "💣", level: 5, max: 20 },
-            speed: { name: "閃電移動", desc: "瞬間移動感十足", icon: "🏃", level: 0, max: 10 },
-            magnet: { name: "全圖拾取", desc: "吸取經驗範圍超大幅增加", icon: "🪐", level: 0, max: 10 }
+            speed: { name: "閃電移動", desc: "移動速度加強", icon: "🏃", level: 0, max: 10 },
+            magnet: { name: "全圖拾取", desc: "吸取經驗範圍增加", icon: "🪐", level: 0, max: 10 }
         };
 
-        function initCanvas() {
-            w = canvas.width = window.innerWidth;
-            h = canvas.height = window.innerHeight;
-        }
+        function initCanvas() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
         window.addEventListener('resize', initCanvas);
         initCanvas();
 
@@ -195,35 +193,27 @@
                 this.x = 0; this.y = 0;
                 this.r = 15; this.hp = 100; this.maxHp = 100;
                 this.xp = 0; this.lv = 1; this.nextXp = 50;
-                this.speed = 5; 
-                this.pickupR = 120;
-                this.damage = 25;
-                this.fireRate = 5;
-                this.bulletCount = 5;
-                
-                // 繼承存檔加成：最高分的 1% 會轉化為初始傷害
-                this.damage += Math.floor(userSaveData.highScore * 0.01);
+                this.speed = 5; this.pickupR = 120;
+                this.damage = 25; this.fireRate = 6; this.bulletCount = 3;
+                this.damage += Math.floor((userSaveData.highScore || 0) * 0.01);
             }
             update() {
                 if (keys['KeyW'] || keys['ArrowUp']) this.y -= this.speed;
                 if (keys['KeyS'] || keys['ArrowDown']) this.y += this.speed;
                 if (keys['KeyA'] || keys['ArrowLeft']) this.x -= this.speed;
                 if (keys['KeyD'] || keys['ArrowRight']) this.x += this.speed;
-                
                 shootTimer++;
-                if (shootTimer >= this.fireRate) {
-                    this.shoot();
-                    shootTimer = 0;
-                }
+                if (shootTimer >= this.fireRate) { this.shoot(); shootTimer = 0; }
             }
             shoot() {
-                let target = null;
-                let minDist = 1000;
-                enemies.forEach(e => {
-                    const d = Math.hypot(e.x - this.x, e.y - this.y);
-                    if (d < minDist) { minDist = d; target = e; }
-                });
-
+                let target = activeBoss || null;
+                if (!target) {
+                    let minDist = 1000;
+                    enemies.forEach(e => {
+                        const d = Math.hypot(e.x - this.x, e.y - this.y);
+                        if (d < minDist) { minDist = d; target = e; }
+                    });
+                }
                 const angle = target ? Math.atan2(target.y - this.y, target.x - this.x) : -Math.PI/2;
                 const spread = 0.35; 
                 for (let i = 0; i < this.bulletCount; i++) {
@@ -233,17 +223,14 @@
                 playSfx(500, 'square', 0.05, 0.005);
             }
             draw() {
+                const pos = camera.toScreen(this.x, this.y);
                 ctx.save();
-                ctx.translate(this.x - camera.x, this.y - camera.y);
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = '#3b82f6';
-                ctx.beginPath();
-                ctx.arc(0, 0, this.r, 0, Math.PI*2);
-                ctx.fillStyle = '#3b82f6';
-                ctx.fill();
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.stroke();
+                ctx.translate(pos.x, pos.y);
+                ctx.scale(camera.zoom, camera.zoom);
+                ctx.shadowBlur = 15; ctx.shadowColor = '#3b82f6';
+                ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2);
+                ctx.fillStyle = '#3b82f6'; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
                 ctx.restore();
             }
         }
@@ -251,28 +238,25 @@
         class Bullet {
             constructor(x, y, angle, dmg) {
                 this.x = x; this.y = y; this.dmg = dmg;
-                this.vx = Math.cos(angle) * 15;
-                this.vy = Math.sin(angle) * 15;
-                this.r = 3;
-                this.life = 120;
+                this.vx = Math.cos(angle) * 15; this.vy = Math.sin(angle) * 15;
+                this.r = 3; this.life = 120;
             }
             update() { this.x += this.vx; this.y += this.vy; this.life--; }
             draw() {
-                ctx.beginPath();
-                ctx.arc(this.x - camera.x, this.y - camera.y, this.r, 0, Math.PI*2);
-                ctx.fillStyle = '#60a5fa';
-                ctx.fill();
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2);
+                ctx.fillStyle = '#60a5fa'; ctx.fill();
             }
         }
 
         class Enemy {
             constructor() {
-                const dist = 600;
+                const spawnDist = (800 / camera.zoom);
                 const angle = Math.random() * Math.PI * 2;
-                this.x = player.x + Math.cos(angle) * dist;
-                this.y = player.y + Math.sin(angle) * dist;
+                this.x = player.x + Math.cos(angle) * spawnDist;
+                this.y = player.y + Math.sin(angle) * spawnDist;
                 this.r = 12 + Math.random() * 8;
-                this.hp = 20 + player.lv * 12;
+                this.hp = 20 + player.lv * 10;
                 this.speed = 1.0 + Math.random() * 1.5;
             }
             update() {
@@ -281,41 +265,121 @@
                 this.y += Math.sin(angle) * this.speed;
             }
             draw() {
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2);
+                ctx.fillStyle = '#ef4444'; ctx.fill();
+            }
+        }
+
+        class Boss {
+            constructor(lv) {
+                const angle = Math.random() * Math.PI * 2;
+                this.x = player.x + Math.cos(angle) * 600;
+                this.y = player.y + Math.sin(angle) * 600;
+                this.r = 60;
+                this.maxHp = 2000 + lv * 1000;
+                this.hp = this.maxHp;
+                this.speed = 0.8;
+                this.attackTimer = 0;
+            }
+            update() {
+                const angle = Math.atan2(player.y - this.y, player.x - this.x);
+                this.x += Math.cos(angle) * this.speed;
+                this.y += Math.sin(angle) * this.speed;
+                
+                this.attackTimer++;
+                if (this.attackTimer > 120) {
+                    this.novaAttack();
+                    this.attackTimer = 0;
+                }
+            }
+            novaAttack() {
+                playSfx(100, 'sawtooth', 0.5, 0.05);
+                for (let i = 0; i < 24; i++) {
+                    const angle = (Math.PI * 2 / 24) * i;
+                    bossBullets.push(new BossBullet(this.x, this.y, angle));
+                }
+            }
+            draw() {
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.save();
+                ctx.translate(pos.x, pos.y);
+                ctx.scale(camera.zoom, camera.zoom);
+                
+                // BOSS 外觀
                 ctx.beginPath();
-                ctx.arc(this.x - camera.x, this.y - camera.y, this.r, 0, Math.PI*2);
-                ctx.fillStyle = '#ef4444';
+                ctx.arc(0, 0, this.r, 0, Math.PI*2);
+                const grad = ctx.createRadialGradient(0,0,0,0,0,this.r);
+                grad.addColorStop(0, '#ef4444');
+                grad.addColorStop(1, '#7f1d1d');
+                ctx.fillStyle = grad;
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                
+                // 核心
+                ctx.beginPath();
+                ctx.arc(0, 0, this.r/2, 0, Math.PI*2);
+                ctx.fillStyle = frame % 20 < 10 ? '#fff' : '#ef4444';
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class BossBullet {
+            constructor(x, y, angle) {
+                this.x = x; this.y = y;
+                this.vx = Math.cos(angle) * 6;
+                this.vy = Math.sin(angle) * 6;
+                this.r = 8;
+            }
+            update() { this.x += this.vx; this.y += this.vy; }
+            draw() {
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2);
+                ctx.fillStyle = '#f87171';
+                ctx.shadowBlur = 10; ctx.shadowColor = '#f87171';
                 ctx.fill();
             }
         }
 
         class Orb {
-            constructor(x, y) { this.x = x; this.y = y; this.r = 4; this.val = 10; }
+            constructor(x, y, val=10) { this.x = x; this.y = y; this.r = 4; this.val = val; }
             update() {
                 const d = Math.hypot(player.x - this.x, player.y - this.y);
                 if (d < player.pickupR) {
                     const angle = Math.atan2(player.y - this.y, player.x - this.x);
-                    this.x += Math.cos(angle) * 12;
-                    this.y += Math.sin(angle) * 12;
+                    this.x += Math.cos(angle) * 12; this.y += Math.sin(angle) * 12;
                 }
             }
             draw() {
-                ctx.beginPath();
-                ctx.arc(this.x - camera.x, this.y - camera.y, this.r, 0, Math.PI*2);
-                ctx.fillStyle = '#fbbf24';
-                ctx.fill();
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2);
+                ctx.fillStyle = this.val > 50 ? '#8b5cf6' : '#fbbf24'; ctx.fill();
             }
         }
 
         function drawGrid() {
-            ctx.strokeStyle = '#1e293b';
-            ctx.lineWidth = 1;
-            const gridSize = 100;
-            const offsetX = -camera.x % gridSize;
-            const offsetY = -camera.y % gridSize;
+            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+            const gridSize = 100 * camera.zoom;
+            const offsetX = (-camera.x * camera.zoom) % gridSize;
+            const offsetY = (-camera.y * camera.zoom) % gridSize;
             ctx.beginPath();
             for (let x = offsetX; x < w; x += gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
             for (let y = offsetY; y < h; y += gridSize) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
             ctx.stroke();
+        }
+
+        function spawnBoss() {
+            document.getElementById('bossWarning').style.display = 'block';
+            playSfx(50, 'sine', 2.0, 0.1);
+            setTimeout(() => {
+                document.getElementById('bossWarning').style.display = 'none';
+                activeBoss = new Boss(player.lv);
+                document.getElementById('bossHpContainer').style.display = 'block';
+            }, 3000);
         }
 
         function showUpgrade() {
@@ -330,7 +394,13 @@
                 const card = document.createElement('div');
                 card.className = "bg-slate-800 p-6 rounded-xl border-2 border-slate-700 hover:border-blue-500 cursor-pointer w-48 text-center transition-all hover:scale-105 shadow-lg";
                 card.innerHTML = `<div class="text-4xl mb-4">${up.icon}</div><div class="font-bold text-xl mb-2">${up.name}</div><div class="text-xs text-slate-400 leading-tight">${up.desc}</div><div class="mt-4 text-blue-400 font-mono">LV ${up.level}</div>`;
-                card.onclick = () => { applyUpgrade(key); document.getElementById('upgradeMenu').classList.add('hidden'); gameActive = true; loop(); };
+                card.onclick = () => { 
+                    applyUpgrade(key); 
+                    document.getElementById('upgradeMenu').classList.add('hidden'); 
+                    gameActive = true; 
+                    if (player.lv % 5 === 0 && !activeBoss) spawnBoss(); // 每 5 級生成 BOSS
+                    loop(); 
+                };
                 options.appendChild(card);
             });
         }
@@ -338,11 +408,11 @@
         function applyUpgrade(key) {
             UPGRADES[key].level++;
             playSfx(600, 'triangle', 0.2, 0.1);
-            if (key === 'bullets') player.bulletCount += 2;
+            if (key === 'bullets') player.bulletCount += 1;
             if (key === 'fireRate') player.fireRate = Math.max(1, player.fireRate - 1);
             if (key === 'damage') player.damage += 15;
-            if (key === 'speed') player.speed += 1.0;
-            if (key === 'magnet') player.pickupR += 100;
+            if (key === 'speed') player.speed += 0.8;
+            if (key === 'magnet') player.pickupR += 80;
         }
 
         function loop() {
@@ -354,51 +424,95 @@
             player.update();
             player.draw();
 
-            if (frame % Math.max(5, 30 - player.lv * 2) === 0) enemies.push(new Enemy());
+            if (!activeBoss && frame % Math.max(3, 20 - player.lv) === 0) enemies.push(new Enemy());
 
-            for (let i = bullets.length - 1; i >= 0; i--) {
-                const b = bullets[i]; b.update(); b.draw();
-                if (b.life <= 0 || Math.hypot(b.x - player.x, b.y - player.y) > 1500) bullets.splice(i, 1);
+            // BOSS 更新
+            if (activeBoss) {
+                activeBoss.update();
+                activeBoss.draw();
+                const hpPercent = (activeBoss.hp / activeBoss.maxHp) * 100;
+                document.getElementById('bossHpBar').style.width = hpPercent + '%';
+                
+                // BOSS 碰撞玩家
+                if (Math.hypot(player.x - activeBoss.x, player.y - activeBoss.y) < player.r + activeBoss.r) {
+                    player.hp -= 2;
+                }
             }
 
+            // BOSS 彈幕
+            for (let i = bossBullets.length - 1; i >= 0; i--) {
+                const b = bossBullets[i]; b.update(); b.draw();
+                if (Math.hypot(player.x - b.x, player.y - b.y) < player.r + b.r) {
+                    player.hp -= 10;
+                    bossBullets.splice(i, 1);
+                    continue;
+                }
+                if (Math.hypot(b.x - player.x, b.y - player.y) > 2000) bossBullets.splice(i, 1);
+            }
+
+            // 玩家子彈
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i]; b.update(); b.draw();
+                
+                if (activeBoss && Math.hypot(b.x - activeBoss.x, b.y - activeBoss.y) < activeBoss.r + b.r) {
+                    activeBoss.hp -= b.dmg;
+                    bullets.splice(i, 1);
+                    if (activeBoss.hp <= 0) {
+                        score += 500;
+                        for(let k=0; k<20; k++) orbs.push(new Orb(activeBoss.x + Math.random()*40-20, activeBoss.y + Math.random()*40-20, 100));
+                        activeBoss = null;
+                        document.getElementById('bossHpContainer').style.display = 'none';
+                        playSfx(200, 'sawtooth', 1.0, 0.1);
+                    }
+                    continue;
+                }
+
+                if (b.life <= 0) { bullets.splice(i, 1); continue; }
+                
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const e = enemies[j];
+                    if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.r) {
+                        e.hp -= b.dmg; bullets.splice(i, 1);
+                        if (e.hp <= 0) {
+                            score += 10; orbs.push(new Orb(e.x, e.y));
+                            enemies.splice(j, 1);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // 普通敵人
             for (let i = enemies.length - 1; i >= 0; i--) {
                 const e = enemies[i]; e.update(); e.draw();
                 if (Math.hypot(player.x - e.x, player.y - e.y) < player.r + e.r) {
-                    player.hp -= 0.8;
+                    player.hp -= 1.0;
                     document.body.classList.add('damage-flash');
                     setTimeout(() => document.body.classList.remove('damage-flash'), 50);
-                    if (player.hp <= 0) {
-                        gameActive = false;
-                        document.getElementById('deathMenu').classList.remove('hidden');
-                        document.getElementById('finalScore').textContent = `得分: ${score}`;
-                        saveGameProgress(score); // 死亡時結算並存檔
-                        return;
-                    }
-                }
-                for (let j = bullets.length - 1; j >= 0; j--) {
-                    const b = bullets[j];
-                    if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.r) {
-                        e.hp -= b.dmg; bullets.splice(j, 1);
-                        if (e.hp <= 0) {
-                            score += 10; orbs.push(new Orb(e.x, e.y));
-                            enemies.splice(i, 1); break;
-                        }
-                    }
                 }
             }
 
+            if (player.hp <= 0) {
+                gameActive = false;
+                document.getElementById('deathMenu').classList.remove('hidden');
+                document.getElementById('finalScore').textContent = `得分: ${score}`;
+                saveGameProgress(score);
+                return;
+            }
+
+            // 經驗球
             for (let i = orbs.length - 1; i >= 0; i--) {
                 const o = orbs[i]; o.update(); o.draw();
                 if (Math.hypot(player.x - o.x, player.y - o.y) < player.r + o.r) {
                     player.xp += o.val; orbs.splice(i, 1);
                     if (player.xp >= player.nextXp) {
-                        player.lv++; player.xp = 0; player.nextXp = Math.floor(player.nextXp * 1.2);
+                        player.lv++; player.xp = 0; player.nextXp = Math.floor(player.nextXp * 1.3);
                         showUpgrade(); return;
                     }
                 }
             }
 
-            document.getElementById('hpUI').textContent = `HP: ${Math.ceil(player.hp)} / ${player.maxHp}`;
+            document.getElementById('hpUI').textContent = `HP: ${Math.max(0, Math.ceil(player.hp))} / ${player.maxHp}`;
             document.getElementById('scoreUI').textContent = `SCORE: ${score}`;
             document.getElementById('levelUI').textContent = `LEVEL ${player.lv}`;
             document.getElementById('xpBar').style.width = (player.xp / player.nextXp * 100) + '%';

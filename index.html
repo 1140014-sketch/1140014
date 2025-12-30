@@ -34,8 +34,8 @@
         .custom-scroll::-webkit-scrollbar-track { background: transparent; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
 
-        .modal { transition: opacity 0.3s ease, transform 0.3s ease; }
-        .hidden-modal { opacity: 0; pointer-events: none; transform: scale(0.95); }
+        /* 修復 Modal 顯示問題 */
+        #authModal { z-index: 9999; }
     </style>
 </head>
 <body class="flex items-center justify-center h-screen m-0">
@@ -92,17 +92,17 @@
     </div>
 
     <!-- 登入視窗 -->
-    <div id="authModal" class="hidden absolute inset-0 bg-slate-950/80 flex items-center justify-center z-[100] p-4">
-        <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 w-full max-w-sm shadow-2xl">
+    <div id="authModal" class="hidden absolute inset-0 bg-slate-950/80 flex items-center justify-center p-4">
+        <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 w-full max-w-sm shadow-2xl relative">
             <h3 id="modalTitle" class="text-2xl font-bold mb-6 text-center">軍事基地准入</h3>
             <div class="space-y-4">
                 <div>
                     <label class="block text-[10px] text-slate-500 mb-1 uppercase">電子郵件</label>
-                    <input type="email" id="emailInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500" placeholder="pilot@elite.ops">
+                    <input type="email" id="emailInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white" placeholder="pilot@elite.ops">
                 </div>
                 <div>
                     <label class="block text-[10px] text-slate-500 mb-1 uppercase">通訊密碼</label>
-                    <input type="password" id="passwordInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500" placeholder="••••••••">
+                    <input type="password" id="passwordInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white" placeholder="••••••••">
                 </div>
                 <div id="authError" class="text-red-500 text-[10px] text-center hidden"></div>
                 <button id="submitAuth" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold transition-colors mt-4">確認身分</button>
@@ -142,6 +142,71 @@
         let userSaveData = { highScore: 0 };
         let isSignUpMode = false;
 
+        // --- 核心邏輯修正：等待 DOM 載入後綁定 ---
+        window.addEventListener('DOMContentLoaded', () => {
+            const authModal = document.getElementById('authModal');
+            const authBtn = document.getElementById('authBtn');
+            const toggleAuthMode = document.getElementById('toggleAuthMode');
+            const submitAuth = document.getElementById('submitAuth');
+            const closeAuth = document.getElementById('closeAuth');
+
+            // 登入按鈕點擊
+            authBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (currentUser && !currentUser.isAnonymous) {
+                    signOut(auth).then(() => {
+                        window.location.reload(); // 登出後刷新以恢復訪客狀態
+                    });
+                } else {
+                    authModal.classList.remove('hidden');
+                }
+            };
+
+            // 關閉視窗
+            closeAuth.onclick = () => authModal.classList.add('hidden');
+
+            // 切換 註冊/登入 模式
+            toggleAuthMode.onclick = () => {
+                isSignUpMode = !isSignUpMode;
+                document.getElementById('modalTitle').textContent = isSignUpMode ? "申請加入部隊" : "軍事基地准入";
+                submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
+                toggleAuthMode.textContent = isSignUpMode ? "已有編號？直接登入" : "還沒有帳號？申請加入特種部隊";
+            };
+
+            // 提交表單
+            submitAuth.onclick = async () => {
+                const email = document.getElementById('emailInput').value;
+                const pass = document.getElementById('passwordInput').value;
+                const errorEl = document.getElementById('authError');
+                
+                if(!email || !pass) {
+                    errorEl.textContent = "請輸入完整電郵與密碼";
+                    errorEl.classList.remove('hidden');
+                    return;
+                }
+
+                errorEl.classList.add('hidden');
+                submitAuth.disabled = true;
+                submitAuth.textContent = "驗證中...";
+
+                try {
+                    if (isSignUpMode) {
+                        await createUserWithEmailAndPassword(auth, email, pass);
+                    } else {
+                        await signInWithEmailAndPassword(auth, email, pass);
+                    }
+                    authModal.classList.add('hidden');
+                } catch (error) {
+                    console.error("Auth Error:", error);
+                    errorEl.textContent = "認證失敗：郵件已使用或密碼太短";
+                    errorEl.classList.remove('hidden');
+                } finally {
+                    submitAuth.disabled = false;
+                    submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
+                }
+            };
+        });
+
         // --- 帳號系統邏輯 ---
         const initAuth = async () => {
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -156,7 +221,7 @@
             if (user) {
                 const isAnonymous = user.isAnonymous;
                 document.getElementById('userIdDisplay').textContent = user.uid;
-                document.getElementById('authStatusText').textContent = isAnonymous ? "訪客模式" : "連線中";
+                document.getElementById('authStatusText').textContent = isAnonymous ? "訪客模式" : "正式成員";
                 document.getElementById('authStatusText').className = isAnonymous ? "text-slate-500 text-xs font-bold" : "text-blue-400 text-xs font-bold";
                 document.getElementById('authBtn').textContent = isAnonymous ? "登入/註冊" : "登出帳號";
                 
@@ -181,49 +246,7 @@
             } catch (e) { console.error(e); }
         }
 
-        // --- 登入介面操作 ---
-        const authModal = document.getElementById('authModal');
-        const authBtn = document.getElementById('authBtn');
-        const toggleAuthMode = document.getElementById('toggleAuthMode');
-        const submitAuth = document.getElementById('submitAuth');
-
-        authBtn.onclick = () => {
-            if (currentUser && !currentUser.isAnonymous) {
-                signOut(auth);
-            } else {
-                authModal.classList.remove('hidden');
-            }
-        };
-
-        document.getElementById('closeAuth').onclick = () => authModal.classList.add('hidden');
-
-        toggleAuthMode.onclick = () => {
-            isSignUpMode = !isSignUpMode;
-            document.getElementById('modalTitle').textContent = isSignUpMode ? "申請加入部隊" : "軍事基地准入";
-            submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
-            toggleAuthMode.textContent = isSignUpMode ? "已有編號？直接登入" : "還沒有帳號？申請加入特種部隊";
-        };
-
-        submitAuth.onclick = async () => {
-            const email = document.getElementById('emailInput').value;
-            const pass = document.getElementById('passwordInput').value;
-            const errorEl = document.getElementById('authError');
-            errorEl.classList.add('hidden');
-
-            try {
-                if (isSignUpMode) {
-                    await createUserWithEmailAndPassword(auth, email, pass);
-                } else {
-                    await signInWithEmailAndPassword(auth, email, pass);
-                }
-                authModal.classList.add('hidden');
-            } catch (error) {
-                errorEl.textContent = "認證失敗：請檢查郵件與密碼格式";
-                errorEl.classList.remove('hidden');
-            }
-        };
-
-        // --- 核心遊戲與同步邏輯 ---
+        // --- 排行榜監聽 ---
         function setupLeaderboardListener() {
             const leaderboardCol = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
             onSnapshot(leaderboardCol, (snapshot) => {
@@ -264,7 +287,7 @@
             setTimeout(() => el.style.opacity = 0, 2000);
         }
 
-        // --- 遊戲渲染與實體邏輯 (沿用前版本並整合帳號) ---
+        // --- 遊戲引擎與渲染邏輯 (保持不變) ---
         const audio = new (window.AudioContext || window.webkitAudioContext)();
         function playSfx(f, t, d, v=0.03) {
             try {

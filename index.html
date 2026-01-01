@@ -3,14 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極限倖存者：聯網競技版</title>
+    <title>極限倖存者：課金戰士版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; overflow: hidden; }
         canvas { background-color: #111827; display: block; border-radius: 0.5rem; cursor: crosshair; }
-        .hud { position: absolute; pointer-events: none; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .hud { position: absolute; pointer-events: none; text-shadow: 0 2px 4px rgba(0,0,0,0.5); z-index: 20; }
+        
         #xpBarContainer { position: absolute; top: 0; left: 0; width: 100%; height: 8px; background: #1e293b; z-index: 10; }
         #xpBar { width: 0%; height: 100%; background: #3b82f6; transition: width 0.2s; }
+        
         .damage-flash { animation: flash 0.15s; }
         @keyframes flash { 0% { background: rgba(220, 38, 38, 0.5); } 100% { background: transparent; } }
         
@@ -23,7 +25,7 @@
         @keyframes boss-alert { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1.1); } }
         
         #bossHpContainer { 
-            position: absolute; top: 40px; left: 20%; width: 60%; height: 12px; 
+            position: absolute; top: 60px; left: 20%; width: 60%; height: 12px; 
             background: #450a0a; border: 2px solid #ef4444; border-radius: 6px; 
             display: none; z-index: 20;
         }
@@ -35,9 +37,13 @@
         .scroll-custom::-webkit-scrollbar-track { background: transparent; }
         .scroll-custom::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
 
-        /* Modal Z-Index Fix */
-        #authModal { z-index: 10000 !important; }
-        #authBtn, #btnExitGame { cursor: pointer; pointer-events: auto; }
+        #btnExitGame { pointer-events: auto; cursor: pointer; }
+        .interactive { pointer-events: auto; }
+        
+        .char-card { transition: all 0.2s; border: 2px solid transparent; }
+        .char-card:hover { transform: translateY(-5px); border-color: #3b82f6; }
+        .char-card.selected { border-color: #fbbf24; background: rgba(59, 130, 246, 0.2); }
+        .char-card.locked { opacity: 0.6; filter: grayscale(1); }
     </style>
 </head>
 <body class="flex items-center justify-center h-screen m-0">
@@ -45,90 +51,120 @@
     <div id="xpBarContainer"><div id="xpBar"></div></div>
     <div id="bossHpContainer"><div id="bossHpBar"></div></div>
     <div id="bossWarning" class="boss-warning">BOSS WARNING</div>
-    <div id="saveIndicator" class="save-indicator">數據已同步至雲端...</div>
+    <div id="saveIndicator" class="save-indicator">進度已保存...</div>
 
     <div class="relative w-full h-full">
         <canvas id="gameCanvas"></canvas>
-        <div class="hud top-4 left-4 text-green-400 font-bold" id="hpUI">HP: 100 / 100</div>
+        <div class="hud top-4 left-4 text-green-400 font-bold text-xl" id="hpUI">HP: 100 / 100</div>
         
-        <div class="hud top-16 right-4 text-yellow-400 font-bold text-right">
-            <div id="scoreUI">SCORE: 0</div>
-            <div id="stageTargetUI" class="text-xs text-slate-400">TARGET: 1000</div>
+        <div class="hud top-16 right-4 text-right">
+            <div id="scoreUI" class="text-white font-bold text-lg">SCORE: 0</div>
+            <div id="coinUI" class="text-yellow-400 font-bold text-lg flex items-center justify-end gap-1">
+                <span>$</span> <span id="coinVal">0</span>
+            </div>
         </div>
         
-        <button id="btnExitGame" onclick="confirmExit()" class="absolute top-4 right-4 bg-red-900/50 hover:bg-red-600 text-white px-4 py-1 rounded border border-red-500/50 transition-colors text-xs font-bold z-20">
+        <button id="btnExitGame" onclick="confirmExit()" class="absolute top-4 right-4 bg-red-900/80 hover:bg-red-600 text-white px-4 py-2 rounded-lg border border-red-500/50 transition-colors text-xs font-bold z-50 shadow-lg interactive">
             退出戰鬥 ✕
         </button>
 
         <div class="hud top-12 left-1/2 -translate-x-1/2 text-center">
-            <div id="stageUI" class="text-blue-400 font-black text-xl">STAGE 1</div>
             <div id="levelUI" class="text-slate-500 text-xs uppercase">LEVEL 1</div>
         </div>
-        <div id="userDisplay" class="hud bottom-4 left-4 text-[10px] text-slate-600 font-mono">User: Loading...</div>
     </div>
 
     <!-- 初始主選單 -->
-    <div id="startMenu" class="absolute inset-0 bg-slate-900/95 flex flex-col md:flex-row items-center justify-center z-50 p-8 gap-8 modal">
-        <div class="flex flex-col items-center max-w-md w-full">
-            <h1 class="text-6xl font-black mb-2 text-blue-500 text-center uppercase tracking-tighter italic">Survivor<br><span class="text-3xl text-red-500 not-italic font-sans">Online Ops</span></h1>
+    <div id="startMenu" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center z-50 p-4 modal overflow-y-auto">
+        <div class="flex flex-col items-center max-w-4xl w-full">
+            <h1 class="text-6xl font-black mb-4 text-blue-500 text-center uppercase tracking-tighter italic">Survivor<br><span class="text-3xl text-yellow-500 not-italic font-sans">Gacha Ops</span></h1>
             
-            <!-- 帳號資訊區 -->
-            <div id="userStats" class="mb-4 w-full bg-slate-800 p-5 rounded-2xl border border-slate-700 shadow-xl">
-                <div class="flex justify-between items-start mb-4">
-                    <div class="text-left">
-                        <p class="text-slate-500 text-[10px] uppercase font-bold tracking-widest">特種兵編號</p>
-                        <p id="userIdDisplayInfo" class="text-slate-300 font-mono text-xs truncate w-32">連線中...</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full mb-8">
+                <!-- 狀態欄 -->
+                <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
+                    <p class="text-slate-500 text-xs uppercase font-bold tracking-widest text-center mb-4">指揮官檔案</p>
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-slate-400">持有金幣</span>
+                        <span class="text-yellow-400 font-black text-2xl" id="menuCoins">0</span>
                     </div>
-                    <button id="authBtn" onclick="handleAuthButtonClick()" class="text-[10px] bg-slate-700 hover:bg-blue-600 px-3 py-1 rounded transition-colors uppercase font-bold text-white shadow-md">登入/註冊</button>
+                    <div class="flex justify-between items-center">
+                        <span class="text-slate-400">最高得分</span>
+                        <span class="text-white font-bold text-xl" id="menuHighScore">0</span>
+                    </div>
                 </div>
-                <div class="flex justify-around items-center border-t border-slate-700 pt-4">
-                    <div class="text-center">
-                        <p class="text-blue-400 text-[10px]">關卡進度</p>
-                        <p id="saveStage" class="text-2xl font-black">1</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-yellow-400 text-[10px]">歷史最高</p>
-                        <p id="saveHighScore" class="text-2xl font-black">0</p>
-                    </div>
+
+                <!-- 抽卡/商店入口 -->
+                <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl flex flex-col justify-center gap-3">
+                    <button id="btnShop" class="w-full bg-yellow-600 hover:bg-yellow-500 py-3 rounded-xl font-bold text-white transition-all">🛒 軍需庫 (角色/抽卡)</button>
+                    <button id="btnLog" class="w-full bg-slate-700 hover:bg-slate-600 py-2 rounded-xl text-sm font-bold text-white transition-all">📋 更新日誌</button>
                 </div>
             </div>
 
-            <div class="flex flex-col w-full gap-3">
-                <button id="btnStart" class="w-full bg-blue-600 hover:bg-blue-500 px-12 py-4 rounded-2xl text-2xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/30">開始新遊戲</button>
-                <button id="btnContinue" class="hidden w-full bg-emerald-600 hover:bg-emerald-500 px-12 py-3 rounded-2xl text-xl font-bold transition-all transform hover:scale-105">繼續上次進度</button>
-                <button id="btnLog" class="w-full bg-slate-700 hover:bg-slate-600 px-12 py-3 rounded-2xl text-lg font-bold transition-all">更新日誌</button>
-            </div>
-        </div>
-
-        <!-- 排行榜面板 -->
-        <div class="bg-slate-800/80 border border-slate-700 rounded-2xl w-full max-w-xs h-[450px] flex flex-col overflow-hidden shadow-2xl backdrop-blur-sm">
-            <div class="bg-slate-700/50 p-3 text-center font-bold text-sm border-b border-slate-600 flex justify-between items-center px-4">
-                <span>🏆 全球英雄榜</span>
-                <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">TOP 20</span>
-            </div>
-            <div id="leaderboardList" class="flex-1 overflow-y-auto p-2 scroll-custom space-y-2">
-                <div class="text-center text-slate-500 py-10 text-xs animate-pulse">正在連接戰略網路...</div>
+            <div class="flex flex-col w-full max-w-md gap-3">
+                <button id="btnStart" class="w-full bg-blue-600 hover:bg-blue-500 px-12 py-5 rounded-2xl text-3xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/30 text-white">開始行動</button>
+                <div id="characterSelectInfo" class="text-center text-blue-300 text-sm font-bold mt-2">當前使用：標準特種兵</div>
             </div>
         </div>
     </div>
 
-    <!-- 登入視窗 -->
-    <div id="authModal" class="hidden fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4 z-[10000]">
-        <div class="bg-slate-800 p-8 rounded-3xl border border-slate-700 w-full max-w-sm shadow-2xl relative">
-            <h3 id="modalTitle" class="text-2xl font-bold mb-6 text-center text-white">軍事基地准入</h3>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-[10px] text-slate-500 mb-1 uppercase">電子郵件</label>
-                    <input type="email" id="emailInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white placeholder-slate-600" placeholder="pilot@elite.ops">
+    <!-- 軍需庫 (商店/抽卡) -->
+    <div id="shopModal" class="hidden absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-[60] p-4 modal">
+        <div class="w-full max-w-5xl h-[90vh] bg-slate-900 rounded-3xl border border-slate-700 flex flex-col overflow-hidden shadow-2xl relative">
+            <!-- 關閉按鈕 -->
+            <button id="btnCloseShop" class="absolute top-4 right-4 text-slate-400 hover:text-white text-2xl z-10">✕</button>
+            
+            <div class="flex border-b border-slate-700">
+                <button class="flex-1 py-4 text-center font-bold bg-slate-800 text-blue-400" id="tabChars">人員調度 (Characters)</button>
+                <button class="flex-1 py-4 text-center font-bold bg-slate-900 text-slate-500 hover:text-white" id="tabGacha">補給抽獎 (Gacha)</button>
+            </div>
+
+            <!-- 角色頁面 -->
+            <div id="panelChars" class="flex-1 p-8 overflow-y-auto scroll-custom">
+                <h2 class="text-2xl font-bold text-white mb-6">選擇你的戰鬥人員</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="charList">
+                    <!-- 動態生成 -->
                 </div>
-                <div>
-                    <label class="block text-[10px] text-slate-500 mb-1 uppercase">通訊密碼</label>
-                    <input type="password" id="passwordInput" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm focus:outline-none focus:border-blue-500 text-white placeholder-slate-600" placeholder="••••••••">
+            </div>
+
+            <!-- 抽卡頁面 -->
+            <div id="panelGacha" class="hidden flex-1 p-8 flex flex-col items-center justify-center relative overflow-hidden">
+                <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNSkiLz48L3N2Zz4=')] opacity-20"></div>
+                
+                <h2 class="text-3xl font-black text-yellow-400 mb-2">幸運補給箱</h2>
+                <p class="text-slate-400 mb-8">抽取永久屬性加成 (所有角色通用)</p>
+                
+                <div class="w-64 h-64 bg-slate-800 rounded-3xl border-4 border-yellow-500 flex items-center justify-center mb-8 shadow-[0_0_50px_rgba(234,179,8,0.2)]">
+                    <span class="text-6xl">📦</span>
                 </div>
-                <div id="authError" class="text-red-500 text-[10px] text-center hidden"></div>
-                <button id="submitAuth" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold transition-colors mt-4 text-white">確認身分</button>
-                <button id="toggleAuthMode" class="w-full text-slate-500 text-[10px] hover:text-slate-300 transition-colors">還沒有帳號？申請加入特種部隊</button>
-                <button id="closeAuth" class="w-full text-slate-600 text-[10px] pt-2 hover:text-slate-400">取消</button>
+
+                <div id="gachaResult" class="h-16 text-center mb-4">
+                    <p class="text-2xl font-bold text-white animate-bounce hidden" id="gachaText">攻擊力 +1 !</p>
+                </div>
+
+                <button id="btnDraw" class="bg-yellow-600 hover:bg-yellow-500 text-white px-12 py-4 rounded-full text-xl font-bold transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                    抽取一次 ($1000)
+                </button>
+                <div class="mt-8 text-left w-full max-w-md bg-slate-800/50 p-4 rounded-xl">
+                    <p class="text-xs text-slate-500 font-bold mb-2">當前永久加成：</p>
+                    <div id="statsList" class="grid grid-cols-2 gap-2 text-sm text-slate-300">
+                        <!-- 數據 -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 bg-slate-800 border-t border-slate-700 flex justify-between items-center">
+                <span class="text-yellow-400 font-bold text-xl ml-4">持有金幣: $<span id="shopCoins">0</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 退出確認視窗 -->
+    <div id="exitModal" class="hidden absolute inset-0 bg-slate-950/80 flex items-center justify-center z-[100] p-4 modal">
+        <div class="bg-slate-800 p-8 rounded-3xl border border-red-500/50 w-full max-w-sm shadow-2xl text-center relative">
+            <h3 class="text-2xl font-black mb-4 text-white">確認撤退？</h3>
+            <p class="text-slate-400 mb-8 text-sm">戰鬥將會暫停。若確認退出，當前進度將會遺失，僅保存金幣與最高分。</p>
+            <div class="flex gap-4 justify-center">
+                <button id="btnExitCancel" class="bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-xl font-bold transition-colors w-1/2">取消</button>
+                <button id="btnExitConfirm" class="bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold transition-colors w-1/2">確認退出</button>
             </div>
         </div>
     </div>
@@ -139,223 +175,277 @@
             <h2 class="text-2xl font-bold text-blue-400 mb-6 flex items-center gap-2"><span>📋</span> 更新日誌</h2>
             <div class="overflow-y-auto scroll-custom flex-1 space-y-6 pr-2">
                 <div class="border-l-4 border-yellow-500 pl-4">
-                    <h3 class="font-bold text-white">v1.4.0 - 聯網競技</h3>
-                    <p class="text-sm text-slate-400">● 恢復帳號登入與註冊功能。</p>
-                    <p class="text-sm text-slate-400">● 全球排行榜回歸，即時同步最高分。</p>
+                    <h3 class="font-bold text-white">v2.1.0 - 財富自由</h3>
+                    <p class="text-sm text-slate-400">● 怪物掉落調整：每隻普通怪物必掉 $50~$100。</p>
+                    <p class="text-sm text-slate-400">● BOSS 擊殺獎勵：掉落 $500 大金幣。</p>
+                    <p class="text-sm text-slate-400">● 修復了一些 UI 顯示問題。</p>
                 </div>
-                <div class="border-l-4 border-blue-500 pl-4">
-                    <h3 class="font-bold text-white">v1.3.0 - 關卡擴張</h3>
-                    <p class="text-sm text-slate-400">● 增加關卡模式與進度存檔。</p>
-                </div>
-                <div class="border-l-4 border-green-500 pl-4">
-                    <h3 class="font-bold text-white">v1.2.0 - 補給更新</h3>
-                    <p class="text-sm text-slate-400">● 增加補血包掉落與 Web Audio 音效。</p>
+                <div class="border-l-4 border-yellow-500 pl-4">
+                    <h3 class="font-bold text-white">v2.0.0 - 課金戰士 (模擬)</h3>
+                    <p class="text-sm text-slate-400">● 新增金幣系統，商店與抽卡功能。</p>
                 </div>
             </div>
             <button id="btnCloseLog" class="mt-8 w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition-all">返回選單</button>
         </div>
     </div>
 
-    <!-- 關卡結算 -->
-    <div id="stageClearMenu" class="hidden absolute inset-0 bg-blue-900/90 flex flex-col items-center justify-center z-45 modal">
-        <h2 class="text-5xl font-black mb-4 text-white text-center">關卡突破！</h2>
-        <p id="clearBonusText" class="text-yellow-400 text-xl mb-8">獲得關卡獎勵：全屬性提升</p>
-        <div class="flex gap-4">
-            <button id="btnMenuFromClear" class="bg-slate-700 hover:bg-slate-600 text-white px-8 py-3 rounded-full text-xl font-bold transition-transform">返回選單</button>
-            <button id="btnNextStage" class="bg-white text-blue-900 px-12 py-3 rounded-full text-xl font-bold hover:scale-105 transition-transform">進入下一關</button>
-        </div>
-    </div>
-
     <!-- 升級介面 -->
     <div id="upgradeMenu" class="hidden absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center z-40 modal">
-        <h2 class="text-4xl font-black mb-8 text-blue-400 text-center px-4">火力進階！選擇強化項目</h2>
+        <h2 class="text-4xl font-black mb-8 text-blue-400 text-center px-4">基因重組！選擇進化方向</h2>
         <div id="upgradeOptions" class="flex flex-wrap justify-center gap-6"></div>
     </div>
 
     <!-- 結束介面 -->
     <div id="deathMenu" class="hidden absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center z-50 modal">
-        <h1 class="text-7xl font-black mb-4 text-white uppercase italic">任務失敗</h1>
-        <p id="finalScore" class="text-3xl mb-4 text-red-200 font-mono">SCORE: 0</p>
-        <p id="newRecordText" class="text-yellow-400 font-bold mb-8 opacity-0 animate-bounce">NEW WORLD RECORD!</p>
+        <h1 class="text-7xl font-black mb-4 text-white uppercase italic">存活終止</h1>
+        <p id="finalScore" class="text-3xl mb-2 text-red-200 font-mono">SCORE: 0</p>
+        <p class="text-yellow-400 text-xl mb-8 font-bold">+ $<span id="earnedCoins">0</span></p>
         <div class="flex gap-4">
             <button id="btnMenuFromDeath" class="bg-slate-700 hover:bg-slate-600 text-white px-8 py-3 rounded-full text-xl font-bold transition-transform">返回選單</button>
             <button onclick="location.reload()" class="bg-white text-red-900 px-12 py-3 rounded-full text-xl font-bold shadow-xl hover:bg-slate-200 transition-transform hover:scale-105">重啟戰場</button>
         </div>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, query, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- Firebase 初始化 ---
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'survivor-elite-online';
-
-        let currentUser = null;
-        let userSaveData = { highScore: 0, currentStage: 1, upgrades: {} };
-        let isSignUpMode = false;
-
-        // --- Auth 與 UI 交互 ---
-        window.handleAuthButtonClick = () => {
-            if (currentUser && !currentUser.isAnonymous) {
-                signOut(auth).then(() => window.location.reload());
-            } else {
-                document.getElementById('authModal').classList.remove('hidden');
-            }
+    <script>
+        const SAVE_KEY = 'survivor_game_v2_data';
+        let userData = { 
+            highScore: 0, 
+            coins: 0,
+            inventory: ['soldier'], 
+            selectedChar: 'soldier',
+            gachaStats: { damage: 0, hp: 0, speed: 0, pickup: 0 }
         };
+
+        const CHARACTERS = {
+            soldier: { name: "標準特種兵", desc: "平衡型，適合新手。", cost: 0, color: '#3b82f6', hpMod: 1, spdMod: 1, dmgMod: 1 },
+            tank: { name: "重裝機兵", desc: "血量極高，自帶緩慢回血。", cost: 2000, color: '#10b981', hpMod: 1.5, spdMod: 0.8, dmgMod: 0.9, regen: 0.2 },
+            ghost: { name: "幽靈特工", desc: "極速移動，高爆擊率。", cost: 3500, color: '#8b5cf6', hpMod: 0.7, spdMod: 1.3, dmgMod: 1.2, crit: 0.2 }
+        };
+
+        function loadGameData() {
+            const saved = localStorage.getItem(SAVE_KEY);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    userData = { ...userData, ...parsed, gachaStats: { ...userData.gachaStats, ...parsed.gachaStats } };
+                } catch(e) { console.error("Save file corrupted"); }
+            }
+            updateMenuUI();
+        }
+
+        function saveGame() {
+            localStorage.setItem(SAVE_KEY, JSON.stringify(userData));
+            updateMenuUI();
+        }
+
+        function updateMenuUI() {
+            const menuHighScoreEl = document.getElementById('menuHighScore');
+            if(menuHighScoreEl) menuHighScoreEl.textContent = userData.highScore;
+
+            const menuCoinsEl = document.getElementById('menuCoins');
+            if(menuCoinsEl) menuCoinsEl.textContent = userData.coins;
+            
+            const shopCoinsEl = document.getElementById('shopCoins');
+            if(shopCoinsEl) shopCoinsEl.textContent = userData.coins;
+            
+            if (CHARACTERS[userData.selectedChar]) {
+                const charName = CHARACTERS[userData.selectedChar].name;
+                const charSelectInfo = document.getElementById('characterSelectInfo');
+                if(charSelectInfo) charSelectInfo.textContent = `當前使用：${charName}`;
+            }
+            
+            updateStatsDisplay();
+            renderCharList();
+        }
+
+        function updateStatsDisplay() {
+            const list = document.getElementById('statsList');
+            const stats = userData.gachaStats;
+            if (list) {
+                list.innerHTML = `
+                    <div>⚔️ 傷害: +${stats.damage}</div>
+                    <div>❤️ 血量: +${stats.hp}</div>
+                    <div>👟 速度: +${stats.speed.toFixed(1)}</div>
+                    <div>🧲 拾取: +${stats.pickup}</div>
+                `;
+            }
+        }
+
+        let gameActive = false;
+        let gamePaused = false;
+        let sessionCoins = 0; 
 
         window.confirmExit = () => {
-            if(confirm("確定要退出當前戰鬥返回主選單嗎？未保存的關卡進度將會遺失。")) {
-                returnToMenu();
-            }
+            gamePaused = true;
+            document.getElementById('exitModal').classList.remove('hidden');
         };
-
-        function returnToMenu() {
-            gameActive = false;
-            document.getElementById('deathMenu').classList.add('hidden');
-            document.getElementById('stageClearMenu').classList.add('hidden');
-            document.getElementById('bossWarning').style.display = 'none';
-            document.getElementById('bossHpContainer').style.display = 'none';
-            document.getElementById('startMenu').classList.remove('hidden');
-            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; activeBoss = null;
-        }
 
         window.addEventListener('DOMContentLoaded', () => {
-            const toggleAuthMode = document.getElementById('toggleAuthMode');
-            const submitAuth = document.getElementById('submitAuth');
-            const closeAuth = document.getElementById('closeAuth');
-            const authError = document.getElementById('authError');
-
-            closeAuth.onclick = () => document.getElementById('authModal').classList.add('hidden');
-
-            toggleAuthMode.onclick = () => {
-                isSignUpMode = !isSignUpMode;
-                document.getElementById('modalTitle').textContent = isSignUpMode ? "申請加入部隊" : "軍事基地准入";
-                submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
-                toggleAuthMode.textContent = isSignUpMode ? "已有編號？直接登入" : "還沒有帳號？申請加入特種部隊";
+            document.getElementById('btnExitCancel').onclick = () => {
+                gamePaused = false;
+                document.getElementById('exitModal').classList.add('hidden');
             };
 
-            submitAuth.onclick = async () => {
-                const email = document.getElementById('emailInput').value;
-                const pass = document.getElementById('passwordInput').value;
-                if(!email || !pass) { authError.textContent = "請輸入完整資訊"; authError.classList.remove('hidden'); return; }
-                
-                authError.classList.add('hidden');
-                submitAuth.disabled = true; submitAuth.textContent = "通訊中...";
-
-                try {
-                    if (isSignUpMode) {
-                        await createUserWithEmailAndPassword(auth, email, pass);
-                    } else {
-                        await signInWithEmailAndPassword(auth, email, pass);
-                    }
-                    document.getElementById('authModal').classList.add('hidden');
-                } catch (error) {
-                    authError.textContent = "驗證失敗：" + error.message;
-                    authError.classList.remove('hidden');
-                } finally {
-                    submitAuth.disabled = false; submitAuth.textContent = isSignUpMode ? "完成註冊" : "確認身分";
-                }
+            document.getElementById('btnExitConfirm').onclick = () => {
+                gamePaused = false;
+                document.getElementById('exitModal').classList.add('hidden');
+                endGame(true);
             };
-            
+
             document.getElementById('btnMenuFromDeath').onclick = returnToMenu;
-            document.getElementById('btnMenuFromClear').onclick = returnToMenu;
+            document.getElementById('btnLog').onclick = () => document.getElementById('logModal').classList.remove('hidden');
+            document.getElementById('btnCloseLog').onclick = () => document.getElementById('logModal').classList.add('hidden');
+            
+            document.getElementById('btnShop').onclick = openShop;
+            document.getElementById('btnCloseShop').onclick = closeShop;
+            document.getElementById('tabChars').onclick = () => switchTab('chars');
+            document.getElementById('tabGacha').onclick = () => switchTab('gacha');
+            document.getElementById('btnDraw').onclick = drawGacha;
+            
+            const btnStart = document.getElementById('btnStart');
+            if (btnStart) {
+                btnStart.onclick = () => { 
+                    score = 0; sessionCoins = 0; 
+                    Object.values(UPGRADES).forEach(u => u.level = 0); 
+                    const coinVal = document.getElementById('coinVal');
+                    if(coinVal) coinVal.textContent = "0";
+
+                    if (audio.state === 'suspended') audio.resume();
+                    document.getElementById('startMenu').classList.add('hidden');
+                    
+                    player = new Player(); 
+                    gameActive = true; 
+                    frame = 0;
+                    enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; coins = []; activeBoss = null;
+                    gamePaused = false;
+                    loop();
+                };
+            }
+
+            loadGameData();
         });
 
-        const initAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                try {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } catch(e) {
-                    await signInAnonymously(auth);
-                }
+        function openShop() {
+            document.getElementById('shopModal').classList.remove('hidden');
+            switchTab('chars');
+        }
+
+        function closeShop() {
+            document.getElementById('shopModal').classList.add('hidden');
+        }
+
+        function switchTab(tab) {
+            const btnChars = document.getElementById('tabChars');
+            const btnGacha = document.getElementById('tabGacha');
+            const panelChars = document.getElementById('panelChars');
+            const panelGacha = document.getElementById('panelGacha');
+
+            if (tab === 'chars') {
+                btnChars.className = "flex-1 py-4 text-center font-bold bg-slate-800 text-blue-400";
+                btnGacha.className = "flex-1 py-4 text-center font-bold bg-slate-900 text-slate-500 hover:text-white";
+                panelChars.classList.remove('hidden');
+                panelGacha.classList.add('hidden');
+                renderCharList();
             } else {
-                await signInAnonymously(auth);
+                btnChars.className = "flex-1 py-4 text-center font-bold bg-slate-900 text-slate-500 hover:text-white";
+                btnGacha.className = "flex-1 py-4 text-center font-bold bg-slate-800 text-yellow-400";
+                panelChars.classList.add('hidden');
+                panelGacha.classList.remove('hidden');
+                updateGachaButton();
+            }
+        }
+
+        function renderCharList() {
+            const container = document.getElementById('charList');
+            if(!container) return;
+            container.innerHTML = '';
+            
+            Object.keys(CHARACTERS).forEach(key => {
+                const char = CHARACTERS[key];
+                const isOwned = userData.inventory.includes(key);
+                const isSelected = userData.selectedChar === key;
+                
+                const div = document.createElement('div');
+                div.className = `bg-slate-800 p-6 rounded-2xl flex flex-col gap-3 relative char-card ${isSelected ? 'selected' : ''}`;
+                if (!isOwned) div.classList.add('locked');
+
+                let actionBtn = '';
+                if (isSelected) {
+                    actionBtn = `<button class="w-full bg-slate-600 text-white py-2 rounded-lg font-bold cursor-default" disabled>已裝備</button>`;
+                } else if (isOwned) {
+                    actionBtn = `<button onclick="equipChar('${key}')" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg font-bold">裝備</button>`;
+                } else {
+                    const canAfford = userData.coins >= char.cost;
+                    actionBtn = `<button onclick="buyChar('${key}')" class="w-full ${canAfford ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-slate-600 cursor-not-allowed'} text-white py-2 rounded-lg font-bold" ${!canAfford?'disabled':''}>購買 $${char.cost}</button>`;
+                }
+
+                div.innerHTML = `
+                    <div class="absolute top-4 right-4 w-4 h-4 rounded-full" style="background:${char.color}"></div>
+                    <h3 class="text-xl font-bold text-white">${char.name}</h3>
+                    <p class="text-xs text-slate-400 flex-1">${char.desc}</p>
+                    <div class="text-xs text-slate-300 space-y-1 my-2">
+                        <div class="flex justify-between"><span>HP</span><span class="font-mono">${Math.round(char.hpMod*100)}%</span></div>
+                        <div class="flex justify-between"><span>SPD</span><span class="font-mono">${Math.round(char.spdMod*100)}%</span></div>
+                        <div class="flex justify-between"><span>DMG</span><span class="font-mono">${Math.round(char.dmgMod*100)}%</span></div>
+                    </div>
+                    ${actionBtn}
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        window.equipChar = (key) => {
+            userData.selectedChar = key;
+            saveGame();
+            renderCharList();
+        };
+
+        window.buyChar = (key) => {
+            const cost = CHARACTERS[key].cost;
+            if (userData.coins >= cost) {
+                userData.coins -= cost;
+                userData.inventory.push(key);
+                userData.selectedChar = key; 
+                saveGame();
+                renderCharList();
+                playSfx(600, 'sine', 0.2);
             }
         };
 
-        onAuthStateChanged(auth, async (user) => {
-            currentUser = user;
-            if (user) {
-                const isAnon = user.isAnonymous;
-                const userDisplayEl = document.getElementById('userDisplay');
-                if (userDisplayEl) userDisplayEl.textContent = `User: ${user.uid}`;
-                const userInfoEl = document.getElementById('userIdDisplayInfo');
-                if (userInfoEl) userInfoEl.textContent = user.uid;
-                const authBtn = document.getElementById('authBtn');
-                if (authBtn) authBtn.textContent = isAnon ? "登入/註冊" : "登出帳號";
-                await loadGameData();
-                setupLeaderboardListener();
+        function updateGachaButton() {
+            const btn = document.getElementById('btnDraw');
+            const canAfford = userData.coins >= 1000;
+            btn.disabled = !canAfford;
+            if (!canAfford) {
+                btn.classList.add('bg-slate-600', 'cursor-not-allowed');
+                btn.classList.remove('bg-yellow-600', 'hover:bg-yellow-500');
+            } else {
+                btn.classList.remove('bg-slate-600', 'cursor-not-allowed');
+                btn.classList.add('bg-yellow-600', 'hover:bg-yellow-500');
             }
-        });
-
-        initAuth();
-
-        async function loadGameData() {
-            if (!currentUser) return;
-            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'main');
-            try {
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    userSaveData = data;
-                    highScore = data.highScore || 0;
-                    document.getElementById('saveStage').textContent = data.currentStage || 1;
-                    document.getElementById('saveHighScore').textContent = highScore;
-                    if (data.currentStage > 1) document.getElementById('btnContinue').classList.remove('hidden');
-                } else {
-                    await setDoc(docRef, userSaveData);
-                }
-            } catch (e) { console.error(e); }
         }
 
-        async function saveGameData(finalScore) {
-            if (!currentUser) return;
-            if (finalScore > (userSaveData.highScore || 0)) {
-                userSaveData.highScore = finalScore;
-                document.getElementById('newRecordText').style.opacity = 1;
-                try {
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', currentUser.uid), {
-                        uid: currentUser.uid, score: finalScore, updatedAt: serverTimestamp()
-                    });
-                } catch(e) {}
-            }
-            userSaveData.currentStage = currentStage;
-            userSaveData.upgrades = UPGRADES;
-            try {
-                await setDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'saveData', 'main'), userSaveData, { merge: true });
-                showSaveIndicator();
-            } catch (e) { console.error(e); }
+        function drawGacha() {
+            if (userData.coins < 1000) return;
+            userData.coins -= 1000;
+            const types = ['damage', 'hp', 'speed', 'pickup'];
+            const type = types[Math.floor(Math.random() * types.length)];
+            let val = 0; let text = "";
+            if (type === 'damage') { val = 1; text = "攻擊力 +1"; userData.gachaStats.damage += 1; }
+            else if (type === 'hp') { val = 10; text = "最大血量 +10"; userData.gachaStats.hp += 10; }
+            else if (type === 'speed') { val = 0.2; text = "移動速度 +0.2"; userData.gachaStats.speed += 0.2; }
+            else if (type === 'pickup') { val = 10; text = "拾取範圍 +10"; userData.gachaStats.pickup += 10; }
+            const resText = document.getElementById('gachaText');
+            resText.textContent = text;
+            resText.classList.remove('hidden');
+            setTimeout(() => resText.classList.add('hidden'), 2000);
+            playSfx(800, 'square', 0.1);
+            setTimeout(() => playSfx(1200, 'square', 0.2), 100);
+            saveGame();
+            updateGachaButton();
+            updateStatsDisplay();
         }
 
-        function setupLeaderboardListener() {
-            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard'), snapshot => {
-                const listEl = document.getElementById('leaderboardList');
-                let scores = [];
-                snapshot.forEach(doc => scores.push(doc.data()));
-                scores.sort((a, b) => b.score - a.score);
-                scores = scores.slice(0, 20);
-                listEl.innerHTML = '';
-                if (scores.length === 0) { listEl.innerHTML = '<div class="text-slate-600 text-center py-10 text-xs">尚無戰鬥紀錄</div>'; return; }
-                scores.forEach((item, idx) => {
-                    const isMe = currentUser && item.uid === currentUser.uid;
-                    const row = document.createElement('div');
-                    row.className = `flex items-center justify-between p-2 rounded-lg text-xs ${isMe ? 'bg-blue-900/40 border border-blue-500/50' : 'bg-slate-700/30'}`;
-                    row.innerHTML = `<div class="flex items-center gap-2 truncate"><span class="font-bold w-4 ${idx<3?'text-yellow-400':'text-slate-500'}">${idx+1}</span><span class="truncate text-slate-300 font-mono">${item.uid.substring(0,8)}</span></div><span class="font-bold text-blue-400">${item.score}</span>`;
-                    listEl.appendChild(row);
-                });
-            }, err => console.log(err));
-        }
-
-        function showSaveIndicator() {
-            const el = document.getElementById('saveIndicator'); el.style.opacity = 1; setTimeout(() => el.style.opacity = 0, 2000);
-        }
-
-        // --- Game Engine ---
         const gameConfig = { width: window.innerWidth, height: window.innerHeight };
         const audio = new (window.AudioContext || window.webkitAudioContext)();
         function playSfx(f, t, d, v=0.03) {
@@ -371,10 +461,10 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
-        let player, gameActive = false, frame = 0, score = 0, shootTimer = 0, activeBoss = null;
-        let enemies = [], bullets = [], orbs = [], bossBullets = [], medkits = [];
-        let currentStage = 1, highScore = 0;
-
+        let player, frame = 0, score = 0, shootTimer = 0, activeBoss = null;
+        let enemies = [], bullets = [], orbs = [], bossBullets = [], medkits = [], coins = [];
+        let plasmaAngle = 0; 
+        
         const camera = {
             x: 0, y: 0, zoom: 1, targetZoom: 1,
             update: function(tx, ty) {
@@ -391,10 +481,11 @@
             fireRate: { name: "超頻連發", desc: "射速提升", icon: "🔥", level: 0 },
             damage: { name: "毀滅彈頭", desc: "傷害加成", icon: "💣", level: 0 },
             speed: { name: "閃電移動", desc: "移動加速", icon: "🏃", level: 0 },
-            magnet: { name: "全圖拾取", desc: "磁力擴張", icon: "🪐", level: 0 }
+            magnet: { name: "全圖拾取", desc: "磁力擴張", icon: "🪐", level: 0 },
+            regen: { name: "奈米修復", desc: "每秒恢復生命", icon: "❤️", level: 0 }, 
+            crit: { name: "弱點偵測", desc: "增加爆擊機率", icon: "🎯", level: 0 }, 
+            plasma: { name: "電漿力場", desc: "周圍持續傷害", icon: "⚡", level: 0 } 
         };
-
-        function getStageTarget(s) { return s * 1500 + (s-1)*(s-1)*500; }
 
         function initCanvas() { gameConfig.width = canvas.width = window.innerWidth; gameConfig.height = canvas.height = window.innerHeight; }
         window.addEventListener('resize', initCanvas); initCanvas();
@@ -405,20 +496,41 @@
 
         class Player {
             constructor() {
-                this.x = 0; this.y = 0; this.r = 15; this.hp = 100; this.maxHp = 100;
+                const baseChar = CHARACTERS[userData.selectedChar];
+                const gacha = userData.gachaStats;
+
+                this.x = 0; this.y = 0; this.r = 15;
+                
+                this.maxHp = (100 + gacha.hp) * baseChar.hpMod;
+                this.hp = this.maxHp;
                 this.xp = 0; this.lv = 1; this.nextXp = 50; 
-                this.speed = 4.5 + (UPGRADES.speed.level * 0.5);
-                this.pickupR = 100 + (UPGRADES.magnet.level * 60); 
-                this.damage = 25 + (UPGRADES.damage.level * 15); 
-                this.fireRate = Math.max(5, 20 - (UPGRADES.fireRate.level * 3)); 
-                this.bulletCount = 1 + UPGRADES.bullets.level;
+                
+                this.speed = (4.5 + gacha.speed) * baseChar.spdMod;
+                this.pickupR = (100 + gacha.pickup); 
+                this.baseDmg = (25 + gacha.damage) * baseChar.dmgMod;
+                
+                this.fireRate = 20; 
+                this.bulletCount = 1;
+                this.regenRate = baseChar.regen || 0;
+                this.critChance = baseChar.crit || 0;
+                this.plasmaDmg = 0;
+                this.plasmaRange = 0;
             }
             update() {
-                if (keys['KeyW'] || keys['ArrowUp']) this.y -= this.speed;
-                if (keys['KeyS'] || keys['ArrowDown']) this.y += this.speed;
-                if (keys['KeyA'] || keys['ArrowLeft']) this.x -= this.speed;
-                if (keys['KeyD'] || keys['ArrowRight']) this.x += this.speed;
-                shootTimer++; if (shootTimer >= this.fireRate) { this.shoot(); shootTimer = 0; }
+                let currentSpeed = this.speed + (UPGRADES.speed.level * 0.5);
+                
+                if (keys['KeyW'] || keys['ArrowUp']) this.y -= currentSpeed;
+                if (keys['KeyS'] || keys['ArrowDown']) this.y += currentSpeed;
+                if (keys['KeyA'] || keys['ArrowLeft']) this.x -= currentSpeed;
+                if (keys['KeyD'] || keys['ArrowRight']) this.x += currentSpeed;
+                
+                let currentFireRate = Math.max(5, this.fireRate - (UPGRADES.fireRate.level * 3));
+                shootTimer++; if (shootTimer >= currentFireRate) { this.shoot(); shootTimer = 0; }
+                
+                let currentRegen = this.regenRate + (UPGRADES.regen.level * 0.5);
+                if (frame % 60 === 0 && currentRegen > 0) {
+                    this.hp = Math.min(this.maxHp, this.hp + currentRegen);
+                }
             }
             shoot() {
                 let target = activeBoss || null;
@@ -427,25 +539,58 @@
                     enemies.forEach(e => { const d = Math.hypot(e.x - this.x, e.y - this.y); if (d < minDist) { minDist = d; target = e; } });
                 }
                 const angle = target ? Math.atan2(target.y - this.y, target.x - this.x) : -Math.PI/2;
-                for (let i = 0; i < this.bulletCount; i++) {
-                    const offset = (i - (this.bulletCount - 1) / 2) * 0.3;
-                    bullets.push(new Bullet(this.x, this.y, angle + offset, this.damage));
+                
+                let currentBulletCount = this.bulletCount + UPGRADES.bullets.level;
+                let currentDmg = this.baseDmg + (UPGRADES.damage.level * 15);
+                let currentCrit = this.critChance + (UPGRADES.crit.level * 0.1);
+
+                for (let i = 0; i < currentBulletCount; i++) {
+                    const offset = (i - (currentBulletCount - 1) / 2) * 0.3;
+                    let isCrit = Math.random() < currentCrit;
+                    let finalDmg = currentDmg * (isCrit ? 2 : 1);
+                    bullets.push(new Bullet(this.x, this.y, angle + offset, finalDmg, isCrit));
                 }
                 playSfx(400, 'square', 0.05, 0.02);
             }
             draw() {
                 const pos = camera.toScreen(this.x, this.y);
                 ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom);
+                
+                let pRange = this.plasmaRange;
+                if(UPGRADES.plasma.level > 0) pRange = 150 + UPGRADES.plasma.level * 20;
+                
+                if (pRange > 0) {
+                    ctx.beginPath(); ctx.arc(0, 0, pRange, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(100, 200, 255, 0.1)`; ctx.fill();
+                    ctx.strokeStyle = `rgba(100, 200, 255, 0.3)`; ctx.lineWidth = 2; ctx.stroke();
+                    ctx.save(); ctx.rotate(plasmaAngle);
+                    for(let i=0; i<3; i++) {
+                        ctx.rotate(Math.PI*2/3);
+                        ctx.beginPath(); ctx.arc(pRange, 0, 5, 0, Math.PI*2); ctx.fillStyle = '#60a5fa'; ctx.fill();
+                    }
+                    ctx.restore();
+                }
+
                 ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2);
-                ctx.fillStyle = '#3b82f6'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = CHARACTERS[userData.selectedChar].color; 
+                ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
                 ctx.restore();
             }
         }
 
         class Bullet {
-            constructor(x, y, a, d) { this.x = x; this.y = y; this.dmg = d; this.vx = Math.cos(a)*12; this.vy = Math.sin(a)*12; this.r = 3.5; }
-            update() { this.x += this.vx; this.y += this.vy; }
-            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#60a5fa'; ctx.fill(); }
+            constructor(x, y, a, d, isCrit) { 
+                this.x = x; this.y = y; this.dmg = d; this.vx = Math.cos(a)*12; this.vy = Math.sin(a)*12; 
+                this.r = isCrit ? 6 : 3.5; 
+                this.color = isCrit ? '#fca5a5' : '#60a5fa'; 
+                this.life = 120;
+            }
+            update() { this.x += this.vx; this.y += this.vy; this.life--; }
+            draw() { 
+                const pos = camera.toScreen(this.x, this.y); 
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); 
+                ctx.fillStyle = this.color; ctx.fill(); 
+            }
         }
 
         class Enemy {
@@ -453,27 +598,92 @@
                 const angle = Math.random() * Math.PI * 2;
                 this.x = player.x + Math.cos(angle) * (850 / camera.zoom);
                 this.y = player.y + Math.sin(angle) * (850 / camera.zoom);
-                const stageMod = 1 + (currentStage - 1) * 0.2;
-                this.r = 12 + Math.random() * 8; this.hp = (20 + player.lv * 12) * stageMod; this.speed = (1.2 + Math.random()) * stageMod;
+                this.r = 12 + Math.random() * 8; 
+                this.hp = (20 + player.lv * 15);
+                this.speed = (1.2 + Math.random());
+                this.wobbleOffset = Math.random() * 10;
             }
-            update() { const angle = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(angle) * this.speed; this.y += Math.sin(angle) * this.speed; }
-            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#ef4444'; ctx.fill(); }
+            update() { 
+                const angle = Math.atan2(player.y - this.y, player.x - this.x); 
+                this.x += Math.cos(angle) * this.speed; 
+                this.y += Math.sin(angle) * this.speed; 
+            }
+            draw() { 
+                const pos = camera.toScreen(this.x, this.y); 
+                const r = this.r * camera.zoom;
+                const wobble = Math.sin(frame * 0.2 + this.wobbleOffset) * (r * 0.15); 
+                ctx.save(); ctx.translate(pos.x, pos.y);
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.moveTo(-r, 0); 
+                ctx.bezierCurveTo(-r, -r*1.5 + wobble, r, -r*1.5 + wobble, r, 0);
+                ctx.quadraticCurveTo(r + wobble, r*0.8, 0, r*0.8);
+                ctx.quadraticCurveTo(-r - wobble, r*0.8, -r, 0);
+                ctx.fill();
+                ctx.fillStyle = 'white';
+                ctx.beginPath(); ctx.arc(-r*0.3, -r*0.2 + wobble*0.5, r*0.25, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(r*0.3, -r*0.2 + wobble*0.5, r*0.25, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'black';
+                ctx.beginPath(); ctx.arc(-r*0.3, -r*0.2 + wobble*0.5, r*0.1, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(r*0.3, -r*0.2 + wobble*0.5, r*0.1, 0, Math.PI*2); ctx.fill();
+                ctx.restore();
+            }
         }
 
         class Medkit {
             constructor(x, y) { this.x = x; this.y = y; this.r = 12; this.heal = 30; }
-            update() { const d = Math.hypot(player.x - this.x, player.y - this.y); if (d < player.pickupR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*8; this.y += Math.sin(a)*8; } }
+            update() { 
+                let pR = player.pickupR + (UPGRADES.magnet.level * 60);
+                const d = Math.hypot(player.x - this.x, player.y - this.y); 
+                if (d < pR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*8; this.y += Math.sin(a)*8; } 
+            }
             draw() { const pos = camera.toScreen(this.x, this.y); ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom); ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.roundRect(-10, -10, 20, 20, 4); ctx.fill(); ctx.fillStyle = 'white'; ctx.fillRect(-2, -7, 4, 14); ctx.fillRect(-7, -2, 14, 4); ctx.restore(); }
+        }
+        
+        class Coin {
+            constructor(x, y, v=1) { this.x = x; this.y = y; this.r = 6; this.val = v; }
+            update() {
+                let pR = player.pickupR + (UPGRADES.magnet.level * 60);
+                const d = Math.hypot(player.x - this.x, player.y - this.y);
+                if (d < pR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*14; this.y += Math.sin(a)*14; }
+            }
+            draw() {
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom);
+                ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(0,0, this.r, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#b45309'; ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center'; ctx.textBaseline='middle'; ctx.fillText('$', 0, 1);
+                ctx.restore();
+            }
         }
 
         class Boss {
             constructor(lv) {
-                this.x = player.x + 600; this.y = player.y; this.r = 60;
-                this.maxHp = (2500 + lv * 1200) * (1 + (currentStage-1)*0.5); this.hp = this.maxHp; this.speed = 0.9 + (currentStage*0.1); this.timer = 0;
+                this.x = player.x + 600; this.y = player.y; this.r = 80; 
+                this.maxHp = 1000 + lv * 600; 
+                this.hp = this.maxHp; this.speed = 0.9; this.timer = 0;
             }
             update() { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; this.timer++; if (this.timer > 100) { this.attack(); this.timer = 0; } }
             attack() { for (let i=0; i<20; i++) bossBullets.push(new BossBullet(this.x, this.y, (Math.PI*2/20)*i)); }
-            draw() { const pos = camera.toScreen(this.x, this.y); ctx.save(); ctx.translate(pos.x, pos.y); ctx.scale(camera.zoom, camera.zoom); ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2); ctx.fillStyle = '#7f1d1d'; ctx.fill(); ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.stroke(); ctx.restore(); }
+            draw() { 
+                const pos = camera.toScreen(this.x, this.y); 
+                const r = this.r * camera.zoom;
+                const wobble = Math.sin(frame * 0.1) * (r * 0.1); 
+                ctx.save(); ctx.translate(pos.x, pos.y);
+                const grad = ctx.createRadialGradient(0, -r*0.5, r*0.2, 0, 0, r);
+                grad.addColorStop(0, '#f87171'); grad.addColorStop(1, '#7f1d1d');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.moveTo(-r, 0); 
+                ctx.bezierCurveTo(-r, -r*1.6 + wobble, r, -r*1.6 + wobble, r, 0);
+                ctx.quadraticCurveTo(r + wobble*0.5, r*0.9, 0, r*0.9);
+                ctx.quadraticCurveTo(-r - wobble*0.5, r*0.9, -r, 0);
+                ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke();
+                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.ellipse(-r*0.3, -r*0.3 + wobble*0.5, r*0.2, r*0.3, -0.2, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(r*0.3, -r*0.3 + wobble*0.5, r*0.2, r*0.3, 0.2, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'red'; 
+                ctx.beginPath(); ctx.arc(-r*0.3, -r*0.3 + wobble*0.5, r*0.05, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(r*0.3, -r*0.3 + wobble*0.5, r*0.05, 0, Math.PI*2); ctx.fill();
+                ctx.restore();
+            }
         }
 
         class BossBullet {
@@ -484,15 +694,20 @@
 
         class Orb {
             constructor(x, y, v=10) { this.x = x; this.y = y; this.r = 4; this.val = v; }
-            update() { const d = Math.hypot(player.x - this.x, player.y - this.y); if (d < player.pickupR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*10; this.y += Math.sin(a)*10; } }
+            update() { 
+                let pR = player.pickupR + (UPGRADES.magnet.level * 60);
+                const d = Math.hypot(player.x - this.x, player.y - this.y); if (d < pR) { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a)*10; this.y += Math.sin(a)*10; } 
+            }
             draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = this.val > 50 ? '#8b5cf6' : '#fbbf24'; ctx.fill(); }
         }
 
         function loop() {
             if (!gameActive) return;
-            ctx.clearRect(0, 0, gameConfig.width, gameConfig.height); frame++; camera.update(player.x, player.y);
+            if (gamePaused) { requestAnimationFrame(loop); return; }
+
+            ctx.clearRect(0, 0, gameConfig.width, gameConfig.height); frame++; plasmaAngle += 0.05;
+            camera.update(player.x, player.y);
             
-            // Grid
             ctx.beginPath(); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
             const gs = 100 * camera.zoom;
             for (let x = (-camera.x * camera.zoom) % gs; x < gameConfig.width; x += gs) { ctx.moveTo(x, 0); ctx.lineTo(x, gameConfig.height); }
@@ -507,11 +722,19 @@
                 document.getElementById('bossHpBar').style.width = (activeBoss.hp / activeBoss.maxHp * 100) + '%';
             }
 
+            // Collisions
             for (let i = bullets.length-1; i>=0; i--) {
                 const b = bullets[i]; b.update(); b.draw();
+                if (b.life <= 0) { bullets.splice(i,1); continue; }
                 if (activeBoss && Math.hypot(b.x-activeBoss.x, b.y-activeBoss.y) < activeBoss.r+b.r) {
                     activeBoss.hp -= b.dmg; bullets.splice(i,1);
-                    if (activeBoss.hp <= 0) { score += 1000; activeBoss = null; document.getElementById('bossHpContainer').style.display = 'none'; }
+                    if (activeBoss.hp <= 0) { 
+                        score += 2000; sessionCoins += 500; // Boss 500 coin
+                        coins.push(new Coin(activeBoss.x, activeBoss.y, 500));
+                        for(let k=0; k<30; k++) orbs.push(new Orb(activeBoss.x + Math.random()*100-50, activeBoss.y + Math.random()*100-50, 100));
+                        medkits.push(new Medkit(activeBoss.x, activeBoss.y)); 
+                        activeBoss = null; document.getElementById('bossHpContainer').style.display = 'none'; 
+                    }
                     continue;
                 }
                 for (let j = enemies.length-1; j>=0; j--) {
@@ -521,6 +744,9 @@
                         if (e.hp <= 0) { 
                             score += 15; orbs.push(new Orb(e.x, e.y)); 
                             if (Math.random() < 0.05) medkits.push(new Medkit(e.x, e.y));
+                            // 普通怪物掉落 50~100 金幣
+                            let coinVal = Math.floor(Math.random() * 51) + 50;
+                            coins.push(new Coin(e.x, e.y, coinVal));
                             enemies.splice(j,1); 
                         }
                         break;
@@ -530,6 +756,16 @@
 
             for (let i = enemies.length-1; i>=0; i--) {
                 const e = enemies[i]; e.update(); e.draw();
+                let pRange = player.plasmaRange; if(UPGRADES.plasma.level > 0) pRange = 150 + UPGRADES.plasma.level * 20;
+                if (player.plasmaDmg > 0 && Math.hypot(player.x - e.x, player.y - e.y) < pRange + e.r) {
+                    e.hp -= player.plasmaDmg * 0.1; 
+                    if (e.hp <= 0) { 
+                        score += 15; orbs.push(new Orb(e.x, e.y)); 
+                        let coinVal = Math.floor(Math.random() * 51) + 50;
+                        coins.push(new Coin(e.x, e.y, coinVal));
+                        enemies.splice(i,1); continue; 
+                    }
+                }
                 if (Math.hypot(player.x-e.x, player.y-e.y) < player.r+e.r) {
                     player.hp -= 0.5; document.body.classList.add('damage-flash');
                     setTimeout(() => document.body.classList.remove('damage-flash'), 50);
@@ -551,22 +787,47 @@
                     medkits.splice(i,1); playSfx(800, 'sine', 0.2, 0.05);
                 }
             }
-
-            const target = getStageTarget(currentStage);
-            if (score >= target) { gameActive = false; document.getElementById('stageClearMenu').classList.remove('hidden'); saveGameData(score); return; }
-            if (player.hp <= 0) {
-                gameActive = false; document.getElementById('deathMenu').classList.remove('hidden');
-                document.getElementById('finalScore').textContent = `SCORE: ${score}`;
-                saveGameData(score); return;
+            
+            for (let i = coins.length-1; i>=0; i--) {
+                const c = coins[i]; c.update(); c.draw();
+                if (Math.hypot(player.x-c.x, player.y-c.y) < player.r+c.r) {
+                    sessionCoins += c.val; coins.splice(i,1); playSfx(1000, 'triangle', 0.1, 0.05);
+                    document.getElementById('coinVal').textContent = sessionCoins;
+                }
             }
+
+            if (player.hp <= 0) { endGame(false); return; }
 
             document.getElementById('hpUI').textContent = `HP: ${Math.ceil(player.hp)} / ${player.maxHp}`;
             document.getElementById('scoreUI').textContent = `SCORE: ${score}`;
-            document.getElementById('stageTargetUI').textContent = `TARGET: ${target}`;
-            document.getElementById('stageUI').textContent = `STAGE ${currentStage}`;
             document.getElementById('levelUI').textContent = `LEVEL ${player.lv}`;
             document.getElementById('xpBar').style.width = (player.xp / player.nextXp * 100) + '%';
             requestAnimationFrame(loop);
+        }
+
+        function returnToMenu() {
+            gameActive = false;
+            document.getElementById('deathMenu').classList.add('hidden');
+            document.getElementById('bossWarning').style.display = 'none';
+            document.getElementById('bossHpContainer').style.display = 'none';
+            document.getElementById('startMenu').classList.remove('hidden');
+            // Reset
+            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; coins = []; activeBoss = null;
+            loadGameData();
+        }
+
+        function endGame(manualExit) {
+            gameActive = false; 
+            if (manualExit) {
+                returnToMenu();
+            } else {
+                document.getElementById('deathMenu').classList.remove('hidden');
+                document.getElementById('finalScore').textContent = `SCORE: ${score}`;
+                document.getElementById('earnedCoins').textContent = sessionCoins;
+                // 更新總金幣
+                userData.coins += sessionCoins;
+                saveGame(); // saveGame stores coins
+            }
         }
 
         function showUpgrade() {
@@ -584,34 +845,12 @@
 
         function applyUpgrade(key) {
             UPGRADES[key].level++;
-            if (key === 'bullets') player.bulletCount++;
-            if (key === 'fireRate') player.fireRate = Math.max(5, player.fireRate - 3);
-            if (key === 'damage') player.damage += 15;
-            if (key === 'speed') player.speed += 0.5;
-            if (key === 'magnet') player.pickupR += 60;
             playSfx(600, 'sine', 0.2);
         }
 
         function spawnBoss() {
             document.getElementById('bossWarning').style.display = 'block';
             setTimeout(() => { document.getElementById('bossWarning').style.display = 'none'; activeBoss = new Boss(player.lv); document.getElementById('bossHpContainer').style.display = 'block'; }, 3000);
-        }
-
-        document.getElementById('btnStart').onclick = () => { currentStage = 1; score = 0; Object.values(UPGRADES).forEach(u => u.level = 0); startGame(); };
-        document.getElementById('btnContinue').onclick = async () => {
-            const data = await loadGameData();
-            if (data) { currentStage = data.currentStage || 1; Object.keys(data.upgrades).forEach(key => { if(UPGRADES[key]) UPGRADES[key].level = data.upgrades[key].level; }); score = getStageTarget(currentStage-1); startGame(); }
-        };
-        document.getElementById('btnNextStage').onclick = () => { currentStage++; document.getElementById('stageClearMenu').classList.add('hidden'); startGame(); };
-        document.getElementById('btnLog').onclick = () => document.getElementById('logModal').classList.remove('hidden');
-        document.getElementById('btnCloseLog').onclick = () => document.getElementById('logModal').classList.add('hidden');
-
-        function startGame() {
-            if (audio.state === 'suspended') audio.resume();
-            document.getElementById('startMenu').classList.add('hidden');
-            player = new Player(); gameActive = true; frame = 0;
-            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; activeBoss = null;
-            loop();
         }
     </script>
 </body>

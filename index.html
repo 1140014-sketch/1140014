@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極限倖存者：課金戰士版</title>
+    <title>極限倖存者：新年賀歲版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; overflow: hidden; }
@@ -37,13 +37,22 @@
         .scroll-custom::-webkit-scrollbar-track { background: transparent; }
         .scroll-custom::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
 
-        #btnExitGame { pointer-events: auto; cursor: pointer; }
+        #btnExitGame, #btnAIAnalysis { pointer-events: auto; cursor: pointer; }
         .interactive { pointer-events: auto; }
         
         .char-card { transition: all 0.2s; border: 2px solid transparent; }
         .char-card:hover { transform: translateY(-5px); border-color: #3b82f6; }
         .char-card.selected { border-color: #fbbf24; background: rgba(59, 130, 246, 0.2); }
         .char-card.locked { opacity: 0.6; filter: grayscale(1); }
+
+        /* AI Loading Animation */
+        .typing-dot { animation: typing 1.4s infinite ease-in-out both; }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+        
+        /* New Year Style */
+        .new-year-glow { text-shadow: 0 0 10px #ef4444, 0 0 20px #fbbf24; }
     </style>
 </head>
 <body class="flex items-center justify-center h-screen m-0">
@@ -66,6 +75,11 @@
         
         <button id="btnExitGame" onclick="confirmExit()" class="absolute top-4 right-4 bg-red-900/80 hover:bg-red-600 text-white px-4 py-2 rounded-lg border border-red-500/50 transition-colors text-xs font-bold z-50 shadow-lg interactive">
             退出戰鬥 ✕
+        </button>
+
+        <!-- AI 戰術分析按鈕 -->
+        <button id="btnAIAnalysis" onclick="openAIAnalysis()" class="absolute top-20 left-4 bg-cyan-900/80 hover:bg-cyan-600 text-cyan-100 px-4 py-2 rounded-lg border border-cyan-500/50 transition-colors text-xs font-bold z-50 shadow-lg interactive flex items-center gap-2">
+            <span>🤖</span> 戰術分析
         </button>
 
         <div class="hud top-12 left-1/2 -translate-x-1/2 text-center">
@@ -100,7 +114,13 @@
             </div>
 
             <div class="flex flex-col w-full max-w-md gap-3">
-                <button id="btnStart" class="w-full bg-blue-600 hover:bg-blue-500 px-12 py-5 rounded-2xl text-3xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/30 text-white">開始行動</button>
+                <button id="btnStart" class="w-full bg-blue-600 hover:bg-blue-500 px-12 py-5 rounded-2xl text-3xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/30 text-white">開始行動 (Endless)</button>
+                
+                <!-- 新年特別活動按鈕 -->
+                <button id="btnNewYear" class="hidden w-full bg-red-600 hover:bg-red-500 px-12 py-5 rounded-2xl text-2xl font-bold transition-all transform hover:scale-105 shadow-lg shadow-red-500/30 text-white border-2 border-yellow-400 new-year-glow">
+                    🧨 新年挑戰：華仔來襲
+                </button>
+
                 <div id="characterSelectInfo" class="text-center text-blue-300 text-sm font-bold mt-2">當前使用：標準特種兵</div>
             </div>
         </div>
@@ -109,51 +129,59 @@
     <!-- 軍需庫 (商店/抽卡) -->
     <div id="shopModal" class="hidden absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-[60] p-4 modal">
         <div class="w-full max-w-5xl h-[90vh] bg-slate-900 rounded-3xl border border-slate-700 flex flex-col overflow-hidden shadow-2xl relative">
-            <!-- 關閉按鈕 -->
             <button id="btnCloseShop" class="absolute top-4 right-4 text-slate-400 hover:text-white text-2xl z-10">✕</button>
-            
             <div class="flex border-b border-slate-700">
                 <button class="flex-1 py-4 text-center font-bold bg-slate-800 text-blue-400" id="tabChars">人員調度 (Characters)</button>
                 <button class="flex-1 py-4 text-center font-bold bg-slate-900 text-slate-500 hover:text-white" id="tabGacha">補給抽獎 (Gacha)</button>
             </div>
-
             <!-- 角色頁面 -->
             <div id="panelChars" class="flex-1 p-8 overflow-y-auto scroll-custom">
                 <h2 class="text-2xl font-bold text-white mb-6">選擇你的戰鬥人員</h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="charList">
-                    <!-- 動態生成 -->
-                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="charList"></div>
             </div>
-
             <!-- 抽卡頁面 -->
             <div id="panelGacha" class="hidden flex-1 p-8 flex flex-col items-center justify-center relative overflow-hidden">
                 <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNSkiLz48L3N2Zz4=')] opacity-20"></div>
-                
                 <h2 class="text-3xl font-black text-yellow-400 mb-2">幸運補給箱</h2>
                 <p class="text-slate-400 mb-8">抽取永久屬性加成 (所有角色通用)</p>
-                
                 <div class="w-64 h-64 bg-slate-800 rounded-3xl border-4 border-yellow-500 flex items-center justify-center mb-8 shadow-[0_0_50px_rgba(234,179,8,0.2)]">
                     <span class="text-6xl">📦</span>
                 </div>
-
                 <div id="gachaResult" class="h-16 text-center mb-4">
                     <p class="text-2xl font-bold text-white animate-bounce hidden" id="gachaText">攻擊力 +1 !</p>
                 </div>
-
                 <button id="btnDraw" class="bg-yellow-600 hover:bg-yellow-500 text-white px-12 py-4 rounded-full text-xl font-bold transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
                     抽取一次 ($1000)
                 </button>
                 <div class="mt-8 text-left w-full max-w-md bg-slate-800/50 p-4 rounded-xl">
                     <p class="text-xs text-slate-500 font-bold mb-2">當前永久加成：</p>
-                    <div id="statsList" class="grid grid-cols-2 gap-2 text-sm text-slate-300">
-                        <!-- 數據 -->
-                    </div>
+                    <div id="statsList" class="grid grid-cols-2 gap-2 text-sm text-slate-300"></div>
                 </div>
             </div>
-
             <div class="p-4 bg-slate-800 border-t border-slate-700 flex justify-between items-center">
                 <span class="text-yellow-400 font-bold text-xl ml-4">持有金幣: $<span id="shopCoins">0</span></span>
             </div>
+        </div>
+    </div>
+
+    <!-- AI 訊息彈窗 -->
+    <div id="aiModal" class="hidden absolute inset-0 bg-slate-950/80 flex items-center justify-center z-[110] p-4 modal">
+        <div class="bg-slate-800 p-8 rounded-3xl border border-cyan-500/50 w-full max-w-lg shadow-2xl relative overflow-hidden">
+            <div class="absolute top-0 right-0 p-4 opacity-10">
+                <svg class="w-32 h-32 text-cyan-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+            </div>
+            <h3 class="text-2xl font-black mb-4 text-cyan-400 flex items-center gap-2">
+                <span id="aiModalIcon">🤖</span> <span id="aiModalTitle">AI 戰術分析</span>
+            </h3>
+            <div id="aiContent" class="text-slate-300 text-base leading-relaxed min-h-[80px]">
+                <div class="flex items-center gap-2 text-cyan-500">
+                    <div class="typing-dot w-2 h-2 bg-cyan-500 rounded-full"></div>
+                    <div class="typing-dot w-2 h-2 bg-cyan-500 rounded-full"></div>
+                    <div class="typing-dot w-2 h-2 bg-cyan-500 rounded-full"></div>
+                    <span>連線至戰術主機...</span>
+                </div>
+            </div>
+            <button id="btnCloseAI" class="mt-6 w-full bg-cyan-700 hover:bg-cyan-600 text-white py-3 rounded-xl font-bold transition-colors">收到，執行指令</button>
         </div>
     </div>
 
@@ -174,15 +202,13 @@
         <div class="bg-slate-800 w-full max-w-lg rounded-3xl border border-slate-700 p-8 shadow-2xl flex flex-col max-h-[80vh]">
             <h2 class="text-2xl font-bold text-blue-400 mb-6 flex items-center gap-2"><span>📋</span> 更新日誌</h2>
             <div class="overflow-y-auto scroll-custom flex-1 space-y-6 pr-2">
-                <div class="border-l-4 border-yellow-500 pl-4">
-                    <h3 class="font-bold text-white">v2.1.0 - 財富自由</h3>
-                    <p class="text-sm text-slate-400">● 怪物掉落調整：每隻普通怪物必掉 $50~$100。</p>
-                    <p class="text-sm text-slate-400">● BOSS 擊殺獎勵：掉落 $500 大金幣。</p>
-                    <p class="text-sm text-slate-400">● 修復了一些 UI 顯示問題。</p>
+                <div class="border-l-4 border-red-600 pl-4">
+                    <h3 class="font-bold text-white">v2.2.3 - 爆炸特效</h3>
+                    <p class="text-sm text-slate-400">● 🧨 新增華麗的粒子爆炸系統。</p>
                 </div>
-                <div class="border-l-4 border-yellow-500 pl-4">
-                    <h3 class="font-bold text-white">v2.0.0 - 課金戰士 (模擬)</h3>
-                    <p class="text-sm text-slate-400">● 新增金幣系統，商店與抽卡功能。</p>
+                 <div class="border-l-4 border-red-600 pl-4">
+                    <h3 class="font-bold text-white">v2.2.2 - 鞭炮大隊</h3>
+                    <p class="text-sm text-slate-400">● 新年模式限定：小怪變為「自爆鞭炮」。</p>
                 </div>
             </div>
             <button id="btnCloseLog" class="mt-8 w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition-all">返回選單</button>
@@ -197,9 +223,10 @@
 
     <!-- 結束介面 -->
     <div id="deathMenu" class="hidden absolute inset-0 bg-red-950/90 flex flex-col items-center justify-center z-50 modal">
-        <h1 class="text-7xl font-black mb-4 text-white uppercase italic">存活終止</h1>
+        <h1 id="deathTitle" class="text-7xl font-black mb-4 text-white uppercase italic">存活終止</h1>
         <p id="finalScore" class="text-3xl mb-2 text-red-200 font-mono">SCORE: 0</p>
-        <p class="text-yellow-400 text-xl mb-8 font-bold">+ $<span id="earnedCoins">0</span></p>
+        <p class="text-yellow-400 text-xl mb-4 font-bold">+ $<span id="earnedCoins">0</span></p>
+        <p id="unlockMsg" class="text-green-400 text-lg mb-8 font-bold animate-bounce hidden">🎉 已解鎖限定角色：劉德華！</p>
         <div class="flex gap-4">
             <button id="btnMenuFromDeath" class="bg-slate-700 hover:bg-slate-600 text-white px-8 py-3 rounded-full text-xl font-bold transition-transform">返回選單</button>
             <button onclick="location.reload()" class="bg-white text-red-900 px-12 py-3 rounded-full text-xl font-bold shadow-xl hover:bg-slate-200 transition-transform hover:scale-105">重啟戰場</button>
@@ -207,7 +234,14 @@
     </div>
 
     <script>
+        const apiKey = ""; 
         const SAVE_KEY = 'survivor_game_v2_data';
+        
+        // BGM Setup
+        const newYearBgm = new Audio('劉德華Andy Lau-恭喜發財(Gong Xi Fa Cai).ogg');
+        newYearBgm.loop = true;
+        newYearBgm.volume = 0.4;
+
         let userData = { 
             highScore: 0, 
             coins: 0,
@@ -219,8 +253,64 @@
         const CHARACTERS = {
             soldier: { name: "標準特種兵", desc: "平衡型，適合新手。", cost: 0, color: '#3b82f6', hpMod: 1, spdMod: 1, dmgMod: 1 },
             tank: { name: "重裝機兵", desc: "血量極高，自帶緩慢回血。", cost: 2000, color: '#10b981', hpMod: 1.5, spdMod: 0.8, dmgMod: 0.9, regen: 0.2 },
-            ghost: { name: "幽靈特工", desc: "極速移動，高爆擊率。", cost: 3500, color: '#8b5cf6', hpMod: 0.7, spdMod: 1.3, dmgMod: 1.2, crit: 0.2 }
+            ghost: { name: "幽靈特工", desc: "極速移動，高爆擊率。", cost: 3500, color: '#8b5cf6', hpMod: 0.7, spdMod: 1.3, dmgMod: 1.2, crit: 0.2 },
+            andylau: { name: "劉德華", desc: "新年限定！恭喜發財，紅包拿來。", cost: 99999, color: '#ef4444', hpMod: 1.2, spdMod: 1.1, dmgMod: 1.5, crit: 0.5, isHidden: true }
         };
+
+        // --- Gemini API Helpers ---
+        async function callGemini(prompt) {
+            if (!apiKey) {
+                console.warn("API Key is missing.");
+                return "通訊模組離線 (API Key missing)";
+            }
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+            try {
+                const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                const data = await response.json();
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || "訊號干擾，無法解析指令。";
+            } catch (error) { console.error("Gemini Error:", error); return "連線失敗，請稍後再試。"; }
+        }
+
+        // --- AI Features ---
+        async function openAIAnalysis() {
+            gamePaused = true;
+            const modal = document.getElementById('aiModal');
+            const content = document.getElementById('aiContent');
+            const title = document.getElementById('aiModalTitle');
+            const icon = document.getElementById('aiModalIcon');
+            modal.classList.remove('hidden');
+            title.textContent = "AI 戰術分析";
+            icon.textContent = "🤖";
+            content.innerHTML = `<div class="flex items-center gap-2 text-cyan-500"><div class="typing-dot w-2 h-2 bg-cyan-500 rounded-full"></div><div class="typing-dot w-2 h-2 bg-cyan-500 rounded-full"></div><div class="typing-dot w-2 h-2 bg-cyan-500 rounded-full"></div><span>連線至戰術主機...</span></div>`;
+            const charName = CHARACTERS[userData.selectedChar].name;
+            const context = `Role: Sci-fi tactical advisor AI. Status: Char:${charName}, HP:${Math.floor(player.hp)}, Score:${score}, Enemies:${enemies.length}. Task: Short tactical advice in Traditional Chinese.`;
+            const reply = await callGemini(context);
+            content.textContent = reply;
+        }
+
+        async function generateCharLore(charKey) {
+            const btn = document.getElementById(`loreBtn-${charKey}`);
+            if(btn) { btn.disabled = true; btn.textContent = "生成中..."; }
+            const char = CHARACTERS[charKey];
+            const prompt = `Task: Generate sci-fi backstory for "${char.name}" in Traditional Chinese. Max 50 words.`;
+            const lore = await callGemini(prompt);
+            const modal = document.getElementById('aiModal');
+            const content = document.getElementById('aiContent');
+            const title = document.getElementById('aiModalTitle');
+            const icon = document.getElementById('aiModalIcon');
+            modal.classList.remove('hidden');
+            title.textContent = `機密檔案：${char.name}`;
+            icon.textContent = "📁";
+            content.textContent = lore;
+            if(btn) { btn.disabled = false; btn.textContent = "✨ 生成機密檔案"; }
+        }
+
+        function closeAIModal() {
+            document.getElementById('aiModal').classList.add('hidden');
+            if (document.getElementById('startMenu').classList.contains('hidden') && !document.getElementById('deathMenu').classList.contains('hidden') === false) { gamePaused = false; }
+        }
 
         function loadGameData() {
             const saved = localStorage.getItem(SAVE_KEY);
@@ -241,19 +331,15 @@
         function updateMenuUI() {
             const menuHighScoreEl = document.getElementById('menuHighScore');
             if(menuHighScoreEl) menuHighScoreEl.textContent = userData.highScore;
-
             const menuCoinsEl = document.getElementById('menuCoins');
             if(menuCoinsEl) menuCoinsEl.textContent = userData.coins;
-            
             const shopCoinsEl = document.getElementById('shopCoins');
             if(shopCoinsEl) shopCoinsEl.textContent = userData.coins;
-            
             if (CHARACTERS[userData.selectedChar]) {
                 const charName = CHARACTERS[userData.selectedChar].name;
                 const charSelectInfo = document.getElementById('characterSelectInfo');
                 if(charSelectInfo) charSelectInfo.textContent = `當前使用：${charName}`;
             }
-            
             updateStatsDisplay();
             renderCharList();
         }
@@ -262,77 +348,83 @@
             const list = document.getElementById('statsList');
             const stats = userData.gachaStats;
             if (list) {
-                list.innerHTML = `
-                    <div>⚔️ 傷害: +${stats.damage}</div>
-                    <div>❤️ 血量: +${stats.hp}</div>
-                    <div>👟 速度: +${stats.speed.toFixed(1)}</div>
-                    <div>🧲 拾取: +${stats.pickup}</div>
-                `;
+                list.innerHTML = `<div>⚔️ 傷害: +${stats.damage}</div><div>❤️ 血量: +${stats.hp}</div><div>👟 速度: +${stats.speed.toFixed(1)}</div><div>🧲 拾取: +${stats.pickup}</div>`;
             }
         }
 
+        // --- 全域變數 ---
+        const gameConfig = { width: window.innerWidth, height: window.innerHeight };
+        let player, frame = 0, score = 0, shootTimer = 0, activeBoss = null;
+        let enemies = [], bullets = [], orbs = [], bossBullets = [], medkits = [], coins = [], particles = [];
+        let plasmaAngle = 0; 
+        
         let gameActive = false;
         let gamePaused = false;
         let sessionCoins = 0; 
+        let isNewYearMode = false;
 
         window.confirmExit = () => {
             gamePaused = true;
             document.getElementById('exitModal').classList.remove('hidden');
         };
+        
+        window.openAIAnalysis = openAIAnalysis;
+        window.generateCharLore = generateCharLore;
 
         window.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('btnExitCancel').onclick = () => {
-                gamePaused = false;
-                document.getElementById('exitModal').classList.add('hidden');
-            };
+            const now = new Date();
+            const endDate = new Date('2026-02-02');
+            if (now < endDate) { document.getElementById('btnNewYear').classList.remove('hidden'); }
 
-            document.getElementById('btnExitConfirm').onclick = () => {
-                gamePaused = false;
-                document.getElementById('exitModal').classList.add('hidden');
-                endGame(true);
-            };
-
+            document.getElementById('btnExitCancel').onclick = () => { gamePaused = false; document.getElementById('exitModal').classList.add('hidden'); };
+            document.getElementById('btnExitConfirm').onclick = () => { gamePaused = false; document.getElementById('exitModal').classList.add('hidden'); endGame(true); };
             document.getElementById('btnMenuFromDeath').onclick = returnToMenu;
             document.getElementById('btnLog').onclick = () => document.getElementById('logModal').classList.remove('hidden');
             document.getElementById('btnCloseLog').onclick = () => document.getElementById('logModal').classList.add('hidden');
-            
             document.getElementById('btnShop').onclick = openShop;
             document.getElementById('btnCloseShop').onclick = closeShop;
             document.getElementById('tabChars').onclick = () => switchTab('chars');
             document.getElementById('tabGacha').onclick = () => switchTab('gacha');
             document.getElementById('btnDraw').onclick = drawGacha;
-            
-            const btnStart = document.getElementById('btnStart');
-            if (btnStart) {
-                btnStart.onclick = () => { 
-                    score = 0; sessionCoins = 0; 
-                    Object.values(UPGRADES).forEach(u => u.level = 0); 
-                    const coinVal = document.getElementById('coinVal');
-                    if(coinVal) coinVal.textContent = "0";
+            document.getElementById('btnCloseAI').onclick = closeAIModal;
 
-                    if (audio.state === 'suspended') audio.resume();
-                    document.getElementById('startMenu').classList.add('hidden');
-                    
-                    player = new Player(); 
-                    gameActive = true; 
-                    frame = 0;
-                    enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; coins = []; activeBoss = null;
-                    gamePaused = false;
-                    loop();
-                };
-            }
+            const btnStart = document.getElementById('btnStart');
+            if (btnStart) btnStart.onclick = () => { startGame(false); };
+            const btnNewYear = document.getElementById('btnNewYear');
+            if (btnNewYear) btnNewYear.onclick = () => { startGame(true); };
 
             loadGameData();
         });
+        
+        function startGame(isNewYear) {
+            isNewYearMode = isNewYear;
+            score = 0; sessionCoins = 0; 
+            // Reset shootTimer
+            shootTimer = 0;
+            
+            Object.values(UPGRADES).forEach(u => u.level = 0); 
+            const coinVal = document.getElementById('coinVal');
+            if(coinVal) coinVal.textContent = "0";
 
-        function openShop() {
-            document.getElementById('shopModal').classList.remove('hidden');
-            switchTab('chars');
+            if (audio.state === 'suspended') audio.resume();
+            document.getElementById('startMenu').classList.add('hidden');
+            
+            if (isNewYearMode) {
+                newYearBgm.currentTime = 0;
+                newYearBgm.play().catch(e => console.error("BGM failed", e));
+            }
+            
+            player = new Player(); 
+            gameActive = true; 
+            frame = 0;
+            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; coins = []; activeBoss = null;
+            particles = []; 
+            gamePaused = false;
+            loop();
         }
 
-        function closeShop() {
-            document.getElementById('shopModal').classList.add('hidden');
-        }
+        function openShop() { document.getElementById('shopModal').classList.remove('hidden'); switchTab('chars'); }
+        function closeShop() { document.getElementById('shopModal').classList.add('hidden'); }
 
         function switchTab(tab) {
             const btnChars = document.getElementById('tabChars');
@@ -343,15 +435,11 @@
             if (tab === 'chars') {
                 btnChars.className = "flex-1 py-4 text-center font-bold bg-slate-800 text-blue-400";
                 btnGacha.className = "flex-1 py-4 text-center font-bold bg-slate-900 text-slate-500 hover:text-white";
-                panelChars.classList.remove('hidden');
-                panelGacha.classList.add('hidden');
-                renderCharList();
+                panelChars.classList.remove('hidden'); panelGacha.classList.add('hidden'); renderCharList();
             } else {
                 btnChars.className = "flex-1 py-4 text-center font-bold bg-slate-900 text-slate-500 hover:text-white";
                 btnGacha.className = "flex-1 py-4 text-center font-bold bg-slate-800 text-yellow-400";
-                panelChars.classList.add('hidden');
-                panelGacha.classList.remove('hidden');
-                updateGachaButton();
+                panelChars.classList.add('hidden'); panelGacha.classList.remove('hidden'); updateGachaButton();
             }
         }
 
@@ -359,70 +447,38 @@
             const container = document.getElementById('charList');
             if(!container) return;
             container.innerHTML = '';
-            
             Object.keys(CHARACTERS).forEach(key => {
                 const char = CHARACTERS[key];
+                if (char.isHidden && !userData.inventory.includes(key)) return; 
                 const isOwned = userData.inventory.includes(key);
                 const isSelected = userData.selectedChar === key;
-                
                 const div = document.createElement('div');
                 div.className = `bg-slate-800 p-6 rounded-2xl flex flex-col gap-3 relative char-card ${isSelected ? 'selected' : ''}`;
                 if (!isOwned) div.classList.add('locked');
-
                 let actionBtn = '';
-                if (isSelected) {
-                    actionBtn = `<button class="w-full bg-slate-600 text-white py-2 rounded-lg font-bold cursor-default" disabled>已裝備</button>`;
-                } else if (isOwned) {
-                    actionBtn = `<button onclick="equipChar('${key}')" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg font-bold">裝備</button>`;
-                } else {
+                if (isSelected) actionBtn = `<button class="w-full bg-slate-600 text-white py-2 rounded-lg font-bold cursor-default" disabled>已裝備</button>`;
+                else if (isOwned) actionBtn = `<button onclick="equipChar('${key}')" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg font-bold">裝備</button>`;
+                else {
                     const canAfford = userData.coins >= char.cost;
                     actionBtn = `<button onclick="buyChar('${key}')" class="w-full ${canAfford ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-slate-600 cursor-not-allowed'} text-white py-2 rounded-lg font-bold" ${!canAfford?'disabled':''}>購買 $${char.cost}</button>`;
                 }
-
-                div.innerHTML = `
-                    <div class="absolute top-4 right-4 w-4 h-4 rounded-full" style="background:${char.color}"></div>
-                    <h3 class="text-xl font-bold text-white">${char.name}</h3>
-                    <p class="text-xs text-slate-400 flex-1">${char.desc}</p>
-                    <div class="text-xs text-slate-300 space-y-1 my-2">
-                        <div class="flex justify-between"><span>HP</span><span class="font-mono">${Math.round(char.hpMod*100)}%</span></div>
-                        <div class="flex justify-between"><span>SPD</span><span class="font-mono">${Math.round(char.spdMod*100)}%</span></div>
-                        <div class="flex justify-between"><span>DMG</span><span class="font-mono">${Math.round(char.dmgMod*100)}%</span></div>
-                    </div>
-                    ${actionBtn}
-                `;
+                const loreBtn = `<button id="loreBtn-${key}" onclick="generateCharLore('${key}')" class="mt-2 text-xs text-cyan-400 hover:text-cyan-300 underline self-start">✨ 生成機密檔案</button>`;
+                div.innerHTML = `<div class="absolute top-4 right-4 w-4 h-4 rounded-full" style="background:${char.color}"></div><h3 class="text-xl font-bold text-white">${char.name}</h3><p class="text-xs text-slate-400 flex-1">${char.desc}</p>${loreBtn}<div class="text-xs text-slate-300 space-y-1 my-2"><div class="flex justify-between"><span>HP</span><span class="font-mono">${Math.round(char.hpMod*100)}%</span></div><div class="flex justify-between"><span>SPD</span><span class="font-mono">${Math.round(char.spdMod*100)}%</span></div><div class="flex justify-between"><span>DMG</span><span class="font-mono">${Math.round(char.dmgMod*100)}%</span></div></div>${actionBtn}`;
                 container.appendChild(div);
             });
         }
 
-        window.equipChar = (key) => {
-            userData.selectedChar = key;
-            saveGame();
-            renderCharList();
-        };
-
+        window.equipChar = (key) => { userData.selectedChar = key; saveGame(); renderCharList(); };
         window.buyChar = (key) => {
             const cost = CHARACTERS[key].cost;
-            if (userData.coins >= cost) {
-                userData.coins -= cost;
-                userData.inventory.push(key);
-                userData.selectedChar = key; 
-                saveGame();
-                renderCharList();
-                playSfx(600, 'sine', 0.2);
-            }
+            if (userData.coins >= cost) { userData.coins -= cost; userData.inventory.push(key); userData.selectedChar = key; saveGame(); renderCharList(); playSfx(600, 'sine', 0.2); }
         };
 
         function updateGachaButton() {
-            const btn = document.getElementById('btnDraw');
-            const canAfford = userData.coins >= 1000;
+            const btn = document.getElementById('btnDraw'); const canAfford = userData.coins >= 1000;
             btn.disabled = !canAfford;
-            if (!canAfford) {
-                btn.classList.add('bg-slate-600', 'cursor-not-allowed');
-                btn.classList.remove('bg-yellow-600', 'hover:bg-yellow-500');
-            } else {
-                btn.classList.remove('bg-slate-600', 'cursor-not-allowed');
-                btn.classList.add('bg-yellow-600', 'hover:bg-yellow-500');
-            }
+            if (!canAfford) { btn.classList.add('bg-slate-600', 'cursor-not-allowed'); btn.classList.remove('bg-yellow-600', 'hover:bg-yellow-500'); }
+            else { btn.classList.remove('bg-slate-600', 'cursor-not-allowed'); btn.classList.add('bg-yellow-600', 'hover:bg-yellow-500'); }
         }
 
         function drawGacha() {
@@ -435,18 +491,12 @@
             else if (type === 'hp') { val = 10; text = "最大血量 +10"; userData.gachaStats.hp += 10; }
             else if (type === 'speed') { val = 0.2; text = "移動速度 +0.2"; userData.gachaStats.speed += 0.2; }
             else if (type === 'pickup') { val = 10; text = "拾取範圍 +10"; userData.gachaStats.pickup += 10; }
-            const resText = document.getElementById('gachaText');
-            resText.textContent = text;
-            resText.classList.remove('hidden');
+            const resText = document.getElementById('gachaText'); resText.textContent = text; resText.classList.remove('hidden');
             setTimeout(() => resText.classList.add('hidden'), 2000);
-            playSfx(800, 'square', 0.1);
-            setTimeout(() => playSfx(1200, 'square', 0.2), 100);
-            saveGame();
-            updateGachaButton();
-            updateStatsDisplay();
+            playSfx(800, 'square', 0.1); setTimeout(() => playSfx(1200, 'square', 0.2), 100);
+            saveGame(); updateGachaButton(); updateStatsDisplay();
         }
 
-        const gameConfig = { width: window.innerWidth, height: window.innerHeight };
         const audio = new (window.AudioContext || window.webkitAudioContext)();
         function playSfx(f, t, d, v=0.03) {
             try {
@@ -460,10 +510,6 @@
 
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        
-        let player, frame = 0, score = 0, shootTimer = 0, activeBoss = null;
-        let enemies = [], bullets = [], orbs = [], bossBullets = [], medkits = [], coins = [];
-        let plasmaAngle = 0; 
         
         const camera = {
             x: 0, y: 0, zoom: 1, targetZoom: 1,
@@ -593,39 +639,131 @@
             }
         }
 
-        class Enemy {
-            constructor() {
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x; this.y = y;
                 const angle = Math.random() * Math.PI * 2;
-                this.x = player.x + Math.cos(angle) * (850 / camera.zoom);
-                this.y = player.y + Math.sin(angle) * (850 / camera.zoom);
+                const speed = Math.random() * 5 + 2;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.03 + 0.02;
+                this.color = color;
+                this.size = Math.random() * 4 + 2;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy;
+                this.vx *= 0.95; this.vy *= 0.95;
+                this.life -= this.decay;
+            }
+            draw() {
+                if (this.life <= 0) return;
+                const pos = camera.toScreen(this.x, this.y);
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, this.size * camera.zoom, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function createExplosion(x, y, color, count = 15) {
+            for(let i=0; i<count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        class Enemy {
+            constructor(x, y, type='slime') {
+                this.type = type;
+                if (x === undefined || y === undefined) {
+                    const angle = Math.random() * Math.PI * 2;
+                    this.x = player.x + Math.cos(angle) * (850 / camera.zoom);
+                    this.y = player.y + Math.sin(angle) * (850 / camera.zoom);
+                } else {
+                    this.x = x; this.y = y;
+                }
+                
                 this.r = 12 + Math.random() * 8; 
                 this.hp = (20 + player.lv * 15);
                 this.speed = (1.2 + Math.random());
                 this.wobbleOffset = Math.random() * 10;
+                
+                if (this.type === 'firecracker') {
+                    this.speed *= 1.4; // Faster
+                    this.color = '#ef4444';
+                    this.hp *= 0.8; // Squishier
+                }
             }
+            
             update() { 
+                if (this.type === 'firecracker') {
+                    const dist = Math.hypot(player.x - this.x, player.y - this.y);
+                    if (dist < 100) { // Explosion range
+                        this.explode();
+                        return;
+                    }
+                }
+                
                 const angle = Math.atan2(player.y - this.y, player.x - this.x); 
                 this.x += Math.cos(angle) * this.speed; 
                 this.y += Math.sin(angle) * this.speed; 
             }
+
+            explode() {
+                // Damage player
+                player.hp -= 20; 
+                document.body.classList.add('damage-flash');
+                setTimeout(() => document.body.classList.remove('damage-flash'), 50);
+                
+                // Visuals
+                createExplosion(this.x, this.y, '#fbbf24', 20);
+                playSfx(100, 'sawtooth', 0.2, 0.2); // Explosion sound
+                
+                // Die
+                this.hp = 0; 
+            }
+
             draw() { 
                 const pos = camera.toScreen(this.x, this.y); 
                 const r = this.r * camera.zoom;
-                const wobble = Math.sin(frame * 0.2 + this.wobbleOffset) * (r * 0.15); 
+                
                 ctx.save(); ctx.translate(pos.x, pos.y);
-                ctx.fillStyle = '#ef4444';
-                ctx.beginPath();
-                ctx.moveTo(-r, 0); 
-                ctx.bezierCurveTo(-r, -r*1.5 + wobble, r, -r*1.5 + wobble, r, 0);
-                ctx.quadraticCurveTo(r + wobble, r*0.8, 0, r*0.8);
-                ctx.quadraticCurveTo(-r - wobble, r*0.8, -r, 0);
-                ctx.fill();
-                ctx.fillStyle = 'white';
-                ctx.beginPath(); ctx.arc(-r*0.3, -r*0.2 + wobble*0.5, r*0.25, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(r*0.3, -r*0.2 + wobble*0.5, r*0.25, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = 'black';
-                ctx.beginPath(); ctx.arc(-r*0.3, -r*0.2 + wobble*0.5, r*0.1, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(r*0.3, -r*0.2 + wobble*0.5, r*0.1, 0, Math.PI*2); ctx.fill();
+                
+                if (this.type === 'firecracker') {
+                    // Firecracker visual
+                    const angle = Math.atan2(player.y - this.y, player.x - this.x);
+                    ctx.rotate(angle);
+                    ctx.fillStyle = '#b91c1c'; // Dark red body
+                    ctx.fillRect(-r, -r/2, r*2, r);
+                    // Fuse
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.fillRect(r, -2, 10, 4);
+                    // Spark
+                    if (Math.random() > 0.5) {
+                        ctx.fillStyle = '#fcd34d';
+                        ctx.beginPath(); ctx.arc(r+10, 0, 3, 0, Math.PI*2); ctx.fill();
+                    }
+                } else {
+                    // Slime visual
+                    const wobble = Math.sin(frame * 0.2 + this.wobbleOffset) * (r * 0.15); 
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.moveTo(-r, 0); 
+                    ctx.bezierCurveTo(-r, -r*1.5 + wobble, r, -r*1.5 + wobble, r, 0);
+                    ctx.quadraticCurveTo(r + wobble, r*0.8, 0, r*0.8);
+                    ctx.quadraticCurveTo(-r - wobble, r*0.8, -r, 0);
+                    ctx.fill();
+                    // Eyes
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath(); ctx.arc(-r*0.3, -r*0.2 + wobble*0.5, r*0.25, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(r*0.3, -r*0.2 + wobble*0.5, r*0.25, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = 'black';
+                    ctx.beginPath(); ctx.arc(-r*0.3, -r*0.2 + wobble*0.5, r*0.1, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(r*0.3, -r*0.2 + wobble*0.5, r*0.1, 0, Math.PI*2); ctx.fill();
+                }
                 ctx.restore();
             }
         }
@@ -657,39 +795,72 @@
         }
 
         class Boss {
-            constructor(lv) {
-                this.x = player.x + 600; this.y = player.y; this.r = 80; 
-                this.maxHp = 1000 + lv * 600; 
+            constructor(lv, type='normal') {
+                this.x = player.x + 600; this.y = player.y; 
+                this.r = 80; 
+                this.type = type;
+                if (type === 'andy') { this.maxHp = 5000 + lv * 1000; this.name = "Andy Lau"; } else { this.maxHp = 1000 + lv * 600; this.name = "Slime King"; }
                 this.hp = this.maxHp; this.speed = 0.9; this.timer = 0;
             }
-            update() { const a = Math.atan2(player.y - this.y, player.x - this.x); this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; this.timer++; if (this.timer > 100) { this.attack(); this.timer = 0; } }
+            update() { 
+                const a = Math.atan2(player.y - this.y, player.x - this.x); 
+                this.x += Math.cos(a) * this.speed; this.y += Math.sin(a) * this.speed; 
+                this.timer++; 
+                if (this.timer > 100) { if(this.type === 'andy') this.andyAttack(); else this.attack(); this.timer = 0; } 
+            }
             attack() { for (let i=0; i<20; i++) bossBullets.push(new BossBullet(this.x, this.y, (Math.PI*2/20)*i)); }
+            andyAttack() {
+                for(let i=0; i<10; i++) { bossBullets.push(new BossBullet(this.x, this.y, Math.random()*Math.PI*2, 'firecracker')); }
+                bossBullets.push(new BossBullet(this.x, this.y, Math.atan2(player.y - this.y, player.x - this.x), 'couplet'));
+            }
             draw() { 
-                const pos = camera.toScreen(this.x, this.y); 
-                const r = this.r * camera.zoom;
-                const wobble = Math.sin(frame * 0.1) * (r * 0.1); 
+                const pos = camera.toScreen(this.x, this.y); const r = this.r * camera.zoom;
                 ctx.save(); ctx.translate(pos.x, pos.y);
-                const grad = ctx.createRadialGradient(0, -r*0.5, r*0.2, 0, 0, r);
-                grad.addColorStop(0, '#f87171'); grad.addColorStop(1, '#7f1d1d');
-                ctx.fillStyle = grad;
-                ctx.beginPath(); ctx.moveTo(-r, 0); 
-                ctx.bezierCurveTo(-r, -r*1.6 + wobble, r, -r*1.6 + wobble, r, 0);
-                ctx.quadraticCurveTo(r + wobble*0.5, r*0.9, 0, r*0.9);
-                ctx.quadraticCurveTo(-r - wobble*0.5, r*0.9, -r, 0);
-                ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke();
-                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.ellipse(-r*0.3, -r*0.3 + wobble*0.5, r*0.2, r*0.3, -0.2, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.ellipse(r*0.3, -r*0.3 + wobble*0.5, r*0.2, r*0.3, 0.2, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = 'red'; 
-                ctx.beginPath(); ctx.arc(-r*0.3, -r*0.3 + wobble*0.5, r*0.05, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(r*0.3, -r*0.3 + wobble*0.5, r*0.05, 0, Math.PI*2); ctx.fill();
+                if (this.type === 'andy') {
+                    ctx.fillStyle = '#b91c1c'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill();
+                    ctx.strokeStyle = '#fcd34d'; ctx.lineWidth = 5; ctx.stroke();
+                    ctx.fillStyle = 'white'; ctx.font = `bold ${r*0.6}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText("華", 0, 0);
+                } else {
+                    const wobble = Math.sin(frame * 0.1) * (r * 0.1); 
+                    const grad = ctx.createRadialGradient(0, -r*0.5, r*0.2, 0, 0, r);
+                    grad.addColorStop(0, '#f87171'); grad.addColorStop(1, '#7f1d1d');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath(); ctx.moveTo(-r, 0); 
+                    ctx.bezierCurveTo(-r, -r*1.6 + wobble, r, -r*1.6 + wobble, r, 0);
+                    ctx.quadraticCurveTo(r + wobble*0.5, r*0.9, 0, r*0.9);
+                    ctx.quadraticCurveTo(-r - wobble*0.5, r*0.9, -r, 0);
+                    ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.stroke();
+                    ctx.fillStyle = 'white'; ctx.beginPath(); ctx.ellipse(-r*0.3, -r*0.3 + wobble*0.5, r*0.2, r*0.3, -0.2, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.ellipse(r*0.3, -r*0.3 + wobble*0.5, r*0.2, r*0.3, 0.2, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = 'red'; 
+                    ctx.beginPath(); ctx.arc(-r*0.3, -r*0.3 + wobble*0.5, r*0.05, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(r*0.3, -r*0.3 + wobble*0.5, r*0.05, 0, Math.PI*2); ctx.fill();
+                }
                 ctx.restore();
             }
         }
 
         class BossBullet {
-            constructor(x, y, a) { this.x = x; this.y = y; this.vx = Math.cos(a)*5; this.vy = Math.sin(a)*5; this.r = 8; }
+            constructor(x, y, a, type='normal') { 
+                this.x = x; this.y = y; this.type = type; this.r = 8; let speed = 5;
+                if (type === 'firecracker') { speed = 8; this.r = 5; }
+                if (type === 'couplet') { speed = 3; this.r = 20; }
+                this.vx = Math.cos(a)*speed; this.vy = Math.sin(a)*speed; this.angle = a;
+            }
             update() { this.x += this.vx; this.y += this.vy; }
-            draw() { const pos = camera.toScreen(this.x, this.y); ctx.beginPath(); ctx.arc(pos.x, pos.y, this.r * camera.zoom, 0, Math.PI*2); ctx.fillStyle = '#f87171'; ctx.fill(); }
+            draw() { 
+                const pos = camera.toScreen(this.x, this.y); const r = this.r * camera.zoom;
+                if (this.type === 'couplet') {
+                     ctx.save(); ctx.translate(pos.x, pos.y); ctx.rotate(this.angle);
+                     ctx.fillStyle = '#ef4444'; ctx.fillRect(-r, -r/2, r*3, r);
+                     ctx.fillStyle = '#fcd34d'; ctx.font = `${r*0.8}px Arial`; ctx.fillText("福", -r*0.5, r*0.3); ctx.restore();
+                } else if (this.type === 'firecracker') {
+                    ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2); ctx.fillStyle = '#ef4444'; ctx.fill();
+                    if(Math.random() > 0.5) { ctx.fillStyle = 'yellow'; ctx.fillRect(pos.x, pos.y, 2, 2); }
+                } else {
+                    ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2); ctx.fillStyle = '#f87171'; ctx.fill(); 
+                }
+            }
         }
 
         class Orb {
@@ -716,10 +887,18 @@
 
             player.update(); player.draw();
 
-            if (!activeBoss && frame % Math.max(5, 30 - player.lv) === 0) enemies.push(new Enemy());
+            if (!activeBoss && frame % Math.max(5, 30 - player.lv) === 0) spawnEnemy();
             if (activeBoss) {
                 activeBoss.update(); activeBoss.draw();
                 document.getElementById('bossHpBar').style.width = (activeBoss.hp / activeBoss.maxHp * 100) + '%';
+            }
+            
+            // Explosion Logic
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update();
+                p.draw();
+                if (p.life <= 0) particles.splice(i, 1);
             }
 
             // Collisions
@@ -729,10 +908,18 @@
                 if (activeBoss && Math.hypot(b.x-activeBoss.x, b.y-activeBoss.y) < activeBoss.r+b.r) {
                     activeBoss.hp -= b.dmg; bullets.splice(i,1);
                     if (activeBoss.hp <= 0) { 
-                        score += 2000; sessionCoins += 500; // Boss 500 coin
+                        createExplosion(activeBoss.x, activeBoss.y, '#fcd34d', 50); // Boss explosion
+                        score += 2000; sessionCoins += 500; 
                         coins.push(new Coin(activeBoss.x, activeBoss.y, 500));
                         for(let k=0; k<30; k++) orbs.push(new Orb(activeBoss.x + Math.random()*100-50, activeBoss.y + Math.random()*100-50, 100));
                         medkits.push(new Medkit(activeBoss.x, activeBoss.y)); 
+                        if (activeBoss.type === 'andy') {
+                            if (!userData.inventory.includes('andylau')) {
+                                userData.inventory.push('andylau');
+                                document.getElementById('unlockMsg').classList.remove('hidden');
+                                setTimeout(() => document.getElementById('unlockMsg').classList.add('hidden'), 5000);
+                            }
+                        }
                         activeBoss = null; document.getElementById('bossHpContainer').style.display = 'none'; 
                     }
                     continue;
@@ -742,9 +929,9 @@
                     if (Math.hypot(e.x-b.x, e.y-b.y) < e.r+b.r) {
                         e.hp -= b.dmg; bullets.splice(i,1);
                         if (e.hp <= 0) { 
+                            if(e.type === 'firecracker') createExplosion(e.x, e.y, '#ef4444', 10);
                             score += 15; orbs.push(new Orb(e.x, e.y)); 
                             if (Math.random() < 0.05) medkits.push(new Medkit(e.x, e.y));
-                            // 普通怪物掉落 50~100 金幣
                             let coinVal = Math.floor(Math.random() * 51) + 50;
                             coins.push(new Coin(e.x, e.y, coinVal));
                             enemies.splice(j,1); 
@@ -760,6 +947,7 @@
                 if (player.plasmaDmg > 0 && Math.hypot(player.x - e.x, player.y - e.y) < pRange + e.r) {
                     e.hp -= player.plasmaDmg * 0.1; 
                     if (e.hp <= 0) { 
+                        if(e.type === 'firecracker') createExplosion(e.x, e.y, '#ef4444', 10);
                         score += 15; orbs.push(new Orb(e.x, e.y)); 
                         let coinVal = Math.floor(Math.random() * 51) + 50;
                         coins.push(new Coin(e.x, e.y, coinVal));
@@ -769,6 +957,16 @@
                 if (Math.hypot(player.x-e.x, player.y-e.y) < player.r+e.r) {
                     player.hp -= 0.5; document.body.classList.add('damage-flash');
                     setTimeout(() => document.body.classList.remove('damage-flash'), 50);
+                }
+            }
+            
+            for (let i = bossBullets.length-1; i>=0; i--) {
+                const bb = bossBullets[i]; bb.update(); bb.draw();
+                if (Math.hypot(player.x - bb.x, player.y - bb.y) < player.r + bb.r) {
+                    player.hp -= 15;
+                    document.body.classList.add('damage-flash');
+                    setTimeout(() => document.body.classList.remove('damage-flash'), 50);
+                    bossBullets.splice(i, 1);
                 }
             }
 
@@ -805,28 +1003,49 @@
             requestAnimationFrame(loop);
         }
 
+        function spawnEnemy() {
+             const angle = Math.random() * Math.PI * 2;
+             const dist = Math.max(canvas.width, canvas.height) / 1.5 + 400; // Farther out
+             // Adjust based on camera
+             let x = player.x + Math.cos(angle) * (850 / camera.zoom);
+             let y = player.y + Math.sin(angle) * (850 / camera.zoom);
+             
+             // In New Year Mode, spawn Firecrackers
+             const type = isNewYearMode ? 'firecracker' : 'slime';
+             enemies.push(new Enemy(x, y, type));
+        }
+
         function returnToMenu() {
             gameActive = false;
             document.getElementById('deathMenu').classList.add('hidden');
             document.getElementById('bossWarning').style.display = 'none';
             document.getElementById('bossHpContainer').style.display = 'none';
             document.getElementById('startMenu').classList.remove('hidden');
+            if (isNewYearMode) newYearBgm.pause(); 
             // Reset
-            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; coins = []; activeBoss = null;
+            enemies = []; bullets = []; orbs = []; bossBullets = []; medkits = []; coins = []; explosions = []; particles = []; activeBoss = null;
             loadGameData();
         }
 
         function endGame(manualExit) {
             gameActive = false; 
+            if (isNewYearMode) newYearBgm.pause();
+            
+            userData.coins += sessionCoins;
+            if (score > userData.highScore) {
+                userData.highScore = score;
+            }
+            saveGame();
+
             if (manualExit) {
                 returnToMenu();
             } else {
                 document.getElementById('deathMenu').classList.remove('hidden');
                 document.getElementById('finalScore').textContent = `SCORE: ${score}`;
                 document.getElementById('earnedCoins').textContent = sessionCoins;
-                // 更新總金幣
-                userData.coins += sessionCoins;
-                saveGame(); // saveGame stores coins
+                if (score >= userData.highScore && score > 0) {
+                     document.getElementById('newRecordText').style.opacity = 1;
+                }
             }
         }
 
@@ -850,7 +1069,22 @@
 
         function spawnBoss() {
             document.getElementById('bossWarning').style.display = 'block';
-            setTimeout(() => { document.getElementById('bossWarning').style.display = 'none'; activeBoss = new Boss(player.lv); document.getElementById('bossHpContainer').style.display = 'block'; }, 3000);
+            
+            const bossType = isNewYearMode ? 'andy' : 'normal';
+            
+            if (bossType === 'andy') {
+                 document.getElementById('bossWarning').style.color = '#fbbf24';
+                 document.getElementById('bossWarning').innerText = "ANDY LAU 登場";
+            } else {
+                 document.getElementById('bossWarning').style.color = '#ef4444';
+                 document.getElementById('bossWarning').innerText = "BOSS WARNING";
+            }
+
+            setTimeout(() => { 
+                document.getElementById('bossWarning').style.display = 'none'; 
+                activeBoss = new Boss(player.lv, bossType); 
+                document.getElementById('bossHpContainer').style.display = 'block'; 
+            }, 3000);
         }
     </script>
 </body>
